@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title_extra %} — Study Tracker{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-md">
+    <h2 style="font-size:1.3rem; font-weight:700;">📚 Study Tracker</h2>
+    <div id="streak-display" class="streak-badge">🔥 <span id="streak-count">0</span> day streak</div>
+</div>
+
+<!-- Log session form -->
+<div class="card mb-md animate-in">
+    <div class="card-header">📝 Log Study Session</div>
+    <div class="study-form">
+        <div>
+            <label>Start Time</label>
+            <input type="time" id="study-start" value="09:00">
+        </div>
+        <div>
+            <label>End Time</label>
+            <input type="time" id="study-end" value="10:00">
+        </div>
+        <div>
+            <label>Track</label>
+            <select id="study-track">
+                <option value="DSA">DSA</option>
+                <option value="GenAI">GenAI</option>
+                <option value="SysDesign">System Design</option>
+                <option value="DS">Data Science</option>
+                <option value="LeetCode">LeetCode</option>
+                <option value="Other">Other</option>
+            </select>
+        </div>
+        <div>
+            <label>Topic</label>
+            <input type="text" id="study-topic" placeholder="e.g. Binary Trees">
+        </div>
+        <div>
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" onclick="logStudy()">Log Session</button>
+        </div>
+    </div>
+    <div style="margin-top:8px; font-size:.82rem; color:var(--text-muted);">
+        Auto-calculated: <strong id="calc-hours">1.0</strong> hours
+    </div>
+</div>
+
+<!-- Today's sessions -->
+<div class="card mb-md animate-in delay-1">
+    <div class="card-header">📋 Today's Sessions — {{ today }}</div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Time</th><th>Track</th><th>Topic</th><th>Hours</th><th></th></tr>
+            </thead>
+            <tbody id="sessions-body">
+                {% for s in sessions %}
+                <tr id="session-{{ s.id }}">
+                    <td>{{ s.start_time }} – {{ s.end_time }}</td>
+                    <td><span class="pill pill-routine">{{ s.track }}</span></td>
+                    <td>{{ s.topic }}</td>
+                    <td>{{ s.hours }}h</td>
+                    <td><button class="btn btn-danger btn-sm" onclick="deleteStudy({{ s.id }})">🗑</button></td>
+                </tr>
+                {% endfor %}
+                {% if not sessions %}
+                <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:24px;">No sessions logged today. Start studying! 💪</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Progress cards + Chart -->
+<div class="flex gap-md" style="flex-wrap:wrap;">
+    <div style="flex:1; min-width:300px;">
+        <div class="card animate-in delay-2">
+            <div class="card-header">📊 Weekly Progress</div>
+            <div id="progress-cards" class="flex flex-col gap-sm"></div>
+        </div>
+    </div>
+    <div style="flex:2; min-width:400px;">
+        <div class="chart-container animate-in delay-3">
+            <div class="card-header">Weekly Study Hours</div>
+            <canvas id="weekly-chart"></canvas>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Calculate hours on time change
+function calcHours() {
+    const s = document.getElementById('study-start').value;
+    const e = document.getElementById('study-end').value;
+    if (s && e) {
+        const [sh, sm] = s.split(':').map(Number);
+        const [eh, em] = e.split(':').map(Number);
+        let hrs = (eh * 60 + em - sh * 60 - sm) / 60;
+        if (hrs < 0) hrs += 24;
+        document.getElementById('calc-hours').textContent = hrs.toFixed(1);
+    }
+}
+document.getElementById('study-start').addEventListener('change', calcHours);
+document.getElementById('study-end').addEventListener('change', calcHours);
+
+function logStudy() {
+    const data = {
+        date: '{{ today }}',
+        start_time: document.getElementById('study-start').value,
+        end_time: document.getElementById('study-end').value,
+        track: document.getElementById('study-track').value,
+        topic: document.getElementById('study-topic').value,
+        hours: parseFloat(document.getElementById('calc-hours').textContent)
+    };
+    if (data.hours <= 0) { alert('End time must be after start time'); return; }
+    fetch('/api/log_study', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(() => location.reload());
+}
+
+function deleteStudy(id) {
+    if (!confirm('Delete this session?')) return;
+    fetch('/api/delete_study/' + id, { method: 'DELETE' })
+        .then(r => r.json()).then(() => location.reload());
+}
+
+// Load weekly chart + progress
+fetch('/api/study_weekly').then(r => r.json()).then(data => {
+    const dates = Object.keys(data).sort();
+    const tracks = ['DSA', 'GenAI', 'SysDesign', 'DS', 'LeetCode', 'Other'];
+    const colors = {
+        DSA: '#22d3ee', GenAI: '#a78bfa', SysDesign: '#34d399',
+        DS: '#fbbf24', LeetCode: '#f87171', Other: '#9198ad'
+    };
+
+    const datasets = tracks.filter(t =>
+        dates.some(d => data[d] && data[d][t])
+    ).map(t => ({
+        label: t,
+        data: dates.map(d => (data[d] && data[d][t]) || 0),
+        backgroundColor: colors[t] || '#9198ad',
+        borderRadius: 4,
+    }));
+
+    if (document.getElementById('weekly-chart')) {
+        new Chart(document.getElementById('weekly-chart'), {
+            type: 'bar',
+            data: { labels: dates.map(d => d.slice(5)), datasets },
+            options: {
+                responsive: true,
+                plugins: { legend: { labels: { color: '#9198ad' } } },
+                scales: {
+                    x: { ticks: { color: '#5c6380' }, grid: { color: '#2a2e3f' } },
+                    y: { ticks: { color: '#5c6380' }, grid: { color: '#2a2e3f' }, beginAtZero: true }
+                }
+            }
+        });
+    }
+});
+
+// Load stats for streak and progress cards
+fetch('/api/stats').then(r => r.json()).then(data => {
+    document.getElementById('streak-count').textContent = data.streak;
+
+    const cards = document.getElementById('progress-cards');
+    const tracks = Object.keys(data.weekly_track);
+    if (tracks.length === 0) {
+        cards.innerHTML = '<p style="color:var(--text-muted); font-size:.85rem;">No study data this week yet.</p>';
+        return;
+    }
+    tracks.forEach(t => {
+        const hrs = data.weekly_track[t] || 0;
+        const target = 14;
+        const pct = Math.min(100, (hrs / target) * 100);
+        cards.innerHTML += `
+            <div class="track-card">
+                <div class="track-name">${t}</div>
+                <div class="track-hours">${hrs.toFixed(1)} / ${target} hrs this week</div>
+                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+            </div>`;
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title_extra %} — Good Morning{% endblock %}
+
+{% block content %}
+<div class="briefing-hero animate-in">
+    <h1 id="greeting-text">Good Day! ☀️</h1>
+    <div class="day-badge">📅 {{ today }} — Day {{ day_num }}</div>
+    <p class="sub-text">Let's make today count.</p>
+</div>
+<script>
+(function() {
+    var h = new Date().getHours();
+    var g = h < 12 ? 'Morning' : (h < 17 ? 'Afternoon' : 'Evening');
+    var e = h < 12 ? '☀️' : (h < 17 ? '🌤️' : '🌙');
+    document.getElementById('greeting-text').textContent = 'Good ' + g + '! ' + e;
+})();
+</script>
+
+<!-- Yesterday's stats -->
+<div class="card-grid animate-in delay-1" style="max-width:600px; margin:0 auto;">
+    <div class="stat-card">
+        <div class="stat-value">{{ yd_done }}/{{ yd_total }}</div>
+        <div class="stat-label">Tasks Done Yesterday</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ (yd_done / yd_total * 100)|int if yd_total > 0 else 0 }}%</div>
+        <div class="stat-label">Completion Rate</div>
+    </div>
+</div>
+
+<!-- Mood selector -->
+<div class="card animate-in delay-2" style="max-width:500px; margin:24px auto; text-align:center;">
+    <div class="card-header">How's your energy today?</div>
+    <div class="mood-selector" id="mood-selector">
+        <button class="mood-btn {% if mood and mood.energy_level == 1 %}selected{% endif %}" data-level="1" title="Very Low">😴</button>
+        <button class="mood-btn {% if mood and mood.energy_level == 2 %}selected{% endif %}" data-level="2" title="Low">😐</button>
+        <button class="mood-btn {% if mood and mood.energy_level == 3 %}selected{% endif %}" data-level="3" title="Okay">🙂</button>
+        <button class="mood-btn {% if mood and mood.energy_level == 4 %}selected{% endif %}" data-level="4" title="Good">😊</button>
+        <button class="mood-btn {% if mood and mood.energy_level == 5 %}selected{% endif %}" data-level="5" title="Amazing">🔥</button>
+    </div>
+</div>
+
+<!-- Today's prep tasks -->
+{% if prep_tasks %}
+<div class="card animate-in delay-3" style="max-width:600px; margin:24px auto;">
+    <div class="card-header">📋 Today's Prep Tasks</div>
+    {% for t in prep_tasks %}
+    <div class="sidebar-tasks">
+        <div class="task-item">
+            <div>
+                <div class="task-text"><strong>{{ t.track }}</strong>: {{ t.task_text }}</div>
+                {% if t.sub_text %}<div class="task-sub">{{ t.sub_text }}</div>{% endif %}
+            </div>
+            {% if t.time_est %}<span class="pill pill-routine">{{ t.time_est }}</span>{% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Start button -->
+<div class="text-center animate-in delay-4" style="margin-top:32px;">
+    <a href="/planner" class="start-btn" id="start-day-btn">🚀 Start My Day</a>
+</div>
+
+<script>
+    // Inject current hour for greeting
+    var now_hour = new Date().getHours();
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.querySelectorAll('#mood-selector .mood-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#mood-selector .mood-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        fetch('/api/save_mood', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({date: '{{ today }}', energy_level: parseInt(btn.dataset.level)})
+        });
+    });
+});
+</script>
+{% endblock %}

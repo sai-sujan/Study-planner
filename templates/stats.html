@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title_extra %} — Stats Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="font-size:1.3rem; font-weight:700; margin-bottom:20px;">📊 Stats Dashboard</h2>
+
+<!-- Summary cards -->
+<div class="card-grid animate-in" id="summary-cards">
+    <div class="stat-card">
+        <div class="stat-value" id="stat-total-hours">—</div>
+        <div class="stat-label">Total Study Hours</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="stat-days">—</div>
+        <div class="stat-label">Days Tracked</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="stat-avg">—</div>
+        <div class="stat-label">Avg Daily Hours</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="stat-streak">—</div>
+        <div class="stat-label">Current Streak 🔥</div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="charts-grid animate-in delay-1">
+    <!-- Donut: hours per track -->
+    <div class="chart-container">
+        <div class="card-header">Hours by Track (All Time)</div>
+        <canvas id="chart-donut"></canvas>
+    </div>
+
+    <!-- Line: daily study hours -->
+    <div class="chart-container">
+        <div class="card-header">Daily Study Hours (Last 14 Days)</div>
+        <canvas id="chart-daily"></canvas>
+    </div>
+
+    <!-- Bar: task completion -->
+    <div class="chart-container">
+        <div class="card-header">Task Completion % by Day</div>
+        <canvas id="chart-completion"></canvas>
+    </div>
+
+    <!-- Line: mood trend -->
+    <div class="chart-container">
+        <div class="card-header">Energy / Mood Trend</div>
+        <canvas id="chart-mood"></canvas>
+    </div>
+</div>
+
+<!-- LeetCode counter -->
+<div class="card mt-lg animate-in delay-2" style="max-width:500px;">
+    <div class="card-header">🧩 LeetCode Counter</div>
+    <p style="font-size:.82rem; color:var(--text-secondary); margin-bottom:12px;">Log problems solved today as a study session.</p>
+    <div class="flex gap-sm items-center">
+        <input type="number" id="leet-count" placeholder="Problems solved" min="0" style="width:160px;">
+        <button class="btn btn-primary btn-sm" onclick="logLeetCode()">Log</button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const trackColors = {
+    DSA: '#22d3ee', GenAI: '#a78bfa', SysDesign: '#34d399',
+    DS: '#fbbf24', LeetCode: '#f87171', Other: '#9198ad'
+};
+
+const chartDefaults = {
+    plugins: { legend: { labels: { color: '#9198ad', font: { family: 'Inter' } } } },
+    scales: {
+        x: { ticks: { color: '#5c6380' }, grid: { color: '#2a2e3f' } },
+        y: { ticks: { color: '#5c6380' }, grid: { color: '#2a2e3f' }, beginAtZero: true }
+    }
+};
+
+fetch('/api/stats').then(r => r.json()).then(data => {
+    // Summary cards
+    document.getElementById('stat-total-hours').textContent = data.total_hours;
+    document.getElementById('stat-days').textContent = data.days_tracked;
+    document.getElementById('stat-avg').textContent = data.avg_daily;
+    document.getElementById('stat-streak').textContent = data.streak;
+
+    // Donut chart — hours per track
+    const tracks = Object.keys(data.track_hours);
+    if (tracks.length > 0) {
+        new Chart(document.getElementById('chart-donut'), {
+            type: 'doughnut',
+            data: {
+                labels: tracks,
+                datasets: [{
+                    data: tracks.map(t => data.track_hours[t]),
+                    backgroundColor: tracks.map(t => trackColors[t] || '#9198ad'),
+                    borderWidth: 0,
+                    hoverOffset: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                cutout: '65%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#9198ad', padding: 16, font: { family: 'Inter' } } }
+                }
+            }
+        });
+    }
+
+    // Line chart — daily study hours
+    const dailyDates = Object.keys(data.daily_hours).sort();
+    if (dailyDates.length > 0) {
+        new Chart(document.getElementById('chart-daily'), {
+            type: 'line',
+            data: {
+                labels: dailyDates.map(d => d.slice(5)),
+                datasets: [{
+                    label: 'Study Hours',
+                    data: dailyDates.map(d => data.daily_hours[d]),
+                    borderColor: '#22d3ee',
+                    backgroundColor: 'rgba(34,211,238,.1)',
+                    fill: true,
+                    tension: .4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#22d3ee'
+                }]
+            },
+            options: { responsive: true, ...chartDefaults }
+        });
+    }
+
+    // Bar chart — task completion
+    const compDates = Object.keys(data.task_completion).sort();
+    if (compDates.length > 0) {
+        new Chart(document.getElementById('chart-completion'), {
+            type: 'bar',
+            data: {
+                labels: compDates.map(d => d.slice(5)),
+                datasets: [{
+                    label: 'Completion %',
+                    data: compDates.map(d => data.task_completion[d]),
+                    backgroundColor: compDates.map(d => {
+                        const v = data.task_completion[d];
+                        return v >= 80 ? '#34d399' : v >= 50 ? '#fbbf24' : '#f87171';
+                    }),
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                ...chartDefaults,
+                scales: {
+                    ...chartDefaults.scales,
+                    y: { ...chartDefaults.scales.y, max: 100 }
+                }
+            }
+        });
+    }
+
+    // Line chart — mood trend
+    const moodDates = Object.keys(data.moods).sort();
+    if (moodDates.length > 0) {
+        new Chart(document.getElementById('chart-mood'), {
+            type: 'line',
+            data: {
+                labels: moodDates.map(d => d.slice(5)),
+                datasets: [{
+                    label: 'Energy Level',
+                    data: moodDates.map(d => data.moods[d]),
+                    borderColor: '#fbbf24',
+                    backgroundColor: 'rgba(251,191,36,.1)',
+                    fill: true,
+                    tension: .4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#fbbf24'
+                }]
+            },
+            options: {
+                responsive: true,
+                ...chartDefaults,
+                scales: {
+                    ...chartDefaults.scales,
+                    y: { ...chartDefaults.scales.y, max: 5, min: 1 }
+                }
+            }
+        });
+    }
+});
+
+function logLeetCode() {
+    const count = parseInt(document.getElementById('leet-count').value);
+    if (!count || count <= 0) { alert('Enter a valid number'); return; }
+    const today = new Date().toISOString().split('T')[0];
+    fetch('/api/log_study', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            date: today,
+            start_time: new Date().toTimeString().slice(0,5),
+            end_time: new Date().toTimeString().slice(0,5),
+            track: 'LeetCode',
+            topic: count + ' problems solved',
+            hours: 0
+        })
+    }).then(r => r.json()).then(() => {
+        alert('Logged ' + count + ' LeetCode problems!');
+        document.getElementById('leet-count').value = '';
+    });
+}
+</script>
+{% endblock %}

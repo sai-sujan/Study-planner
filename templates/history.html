@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title_extra %} — History{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-md">
+    <h2 style="font-size:1.3rem; font-weight:700;">📆 Day History</h2>
+    <p style="font-size:.82rem; color:var(--text-secondary);">Click any day to see full details</p>
+</div>
+
+<div class="card animate-in">
+    <div class="calendar-grid">
+        <div class="cal-header">Sun</div>
+        <div class="cal-header">Mon</div>
+        <div class="cal-header">Tue</div>
+        <div class="cal-header">Wed</div>
+        <div class="cal-header">Thu</div>
+        <div class="cal-header">Fri</div>
+        <div class="cal-header">Sat</div>
+
+        <!-- Filled by JS -->
+        <div id="calendar-cells"></div>
+    </div>
+</div>
+
+<!-- Day detail modal -->
+<div class="modal-overlay" id="day-modal">
+    <div class="modal">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <h3 id="modal-title" style="font-size:1.1rem; font-weight:700;"></h3>
+        <div id="modal-content"></div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const dayData = {{ day_data|tojson }};
+
+function buildCalendar() {
+    const container = document.getElementById('calendar-cells');
+    const grid = container.parentElement;
+    const dates = Object.keys(dayData).sort();
+    if (dates.length === 0) {
+        container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:40px; color:var(--text-muted);">No data yet. Start planning your day!</div>';
+        return;
+    }
+
+    const firstDate = new Date(dates[0] + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Start from the Sunday of the first week
+    const startDate = new Date(firstDate);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+
+    // End at Saturday of this week
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
+
+    let current = new Date(startDate);
+    while (current <= endDate) {
+        const ds = current.toISOString().split('T')[0];
+        const info = dayData[ds];
+        let cls = 'cal-cell';
+        let content = '';
+
+        if (info) {
+            if (info.pct >= 80) cls += ' green';
+            else if (info.pct >= 50) cls += ' amber';
+            else cls += ' red';
+            content = `<div class="cal-date">${current.getDate()}</div><div class="cal-pct">${info.pct}%</div>`;
+        } else if (current <= today) {
+            cls += ' empty';
+            content = `<div class="cal-date" style="opacity:.4">${current.getDate()}</div>`;
+        } else {
+            cls += ' empty';
+            content = `<div class="cal-date" style="opacity:.2">${current.getDate()}</div>`;
+        }
+
+        const cell = document.createElement('div');
+        cell.className = cls;
+        cell.innerHTML = content;
+        if (info) {
+            cell.onclick = () => openDayModal(ds);
+        }
+        grid.appendChild(cell);
+
+        current.setDate(current.getDate() + 1);
+    }
+}
+
+function openDayModal(day) {
+    document.getElementById('modal-title').textContent = '📅 ' + day;
+    const content = document.getElementById('modal-content');
+    content.innerHTML = '<p style="color:var(--text-muted);">Loading...</p>';
+
+    fetch('/api/day_data/' + day).then(r => r.json()).then(data => {
+        let html = '';
+
+        // Mood
+        if (data.mood) {
+            const emojis = ['', '😴', '😐', '🙂', '😊', '🔥'];
+            html += `<div class="flex items-center gap-sm mb-md">
+                <span style="font-size:1.5rem">${emojis[data.mood.energy_level] || ''}</span>
+                <span style="color:var(--text-secondary)">Energy: ${data.mood.energy_level}/5</span>
+            </div>`;
+        }
+
+        // Hour blocks
+        if (data.blocks.length > 0) {
+            html += '<div class="card-header" style="margin-top:12px;">Hourly Plan</div>';
+            html += '<table><thead><tr><th>Hour</th><th>Task</th><th>Category</th><th>Done</th></tr></thead><tbody>';
+            data.blocks.forEach(b => {
+                if (b.task_title) {
+                    html += `<tr>
+                        <td>${String(b.hour).padStart(2,'0')}:00</td>
+                        <td>${b.task_title}</td>
+                        <td><span class="pill pill-routine">${b.category}</span></td>
+                        <td>${b.is_done ? '✅' : '⬜'}</td>
+                    </tr>`;
+                }
+            });
+            html += '</tbody></table>';
+        }
+
+        // Study sessions
+        if (data.sessions.length > 0) {
+            html += '<div class="card-header" style="margin-top:20px;">Study Sessions</div>';
+            html += '<table><thead><tr><th>Time</th><th>Track</th><th>Topic</th><th>Hours</th></tr></thead><tbody>';
+            data.sessions.forEach(s => {
+                html += `<tr>
+                    <td>${s.start_time} – ${s.end_time}</td>
+                    <td><span class="pill pill-routine">${s.track}</span></td>
+                    <td>${s.topic}</td>
+                    <td>${s.hours}h</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+        }
+
+        // Tasks
+        if (data.tasks.length > 0) {
+            html += '<div class="card-header" style="margin-top:20px;">Prep Tasks</div>';
+            data.tasks.forEach(t => {
+                html += `<div class="flex items-center gap-sm" style="padding:6px 0; border-bottom:1px solid var(--border);">
+                    <span>${t.is_done ? '✅' : '⬜'}</span>
+                    <span><strong>${t.track}</strong>: ${t.task_text}</span>
+                </div>`;
+            });
+        }
+
+        // Notes
+        if (data.note && (data.note.full_notes || data.note.key_learnings)) {
+            html += '<div class="card-header" style="margin-top:20px;">Notes</div>';
+            if (data.note.full_notes) {
+                html += `<div style="background:var(--bg-input); padding:12px; border-radius:8px; font-size:.85rem; white-space:pre-wrap; margin-bottom:8px;">${data.note.full_notes}</div>`;
+            }
+            if (data.note.key_learnings) {
+                html += '<div class="card-header" style="font-size:.85rem;">Key Learnings</div>';
+                html += `<div style="background:var(--bg-input); padding:12px; border-radius:8px; font-size:.85rem; white-space:pre-wrap;">${data.note.key_learnings}</div>`;
+            }
+        }
+
+        if (!html) html = '<p style="color:var(--text-muted);">No detailed data for this day.</p>';
+        content.innerHTML = html;
+    });
+
+    document.getElementById('day-modal').classList.add('show');
+}
+
+function closeModal() {
+    document.getElementById('day-modal').classList.remove('show');
+}
+
+// Close modal on overlay click
+document.getElementById('day-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+buildCalendar();
+</script>
+{% endblock %}

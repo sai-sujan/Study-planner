@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day Planner{% block title_extra %}{% endblock %}</title>
+    <meta name="description" content="Personal day planner for tracking daily activities, study sessions, and goals.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <nav class="navbar" id="main-nav">
+        <div class="nav-brand">
+            <span class="nav-logo">📋</span>
+            <span class="nav-title">Day Planner</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}" id="nav-briefing">
+                <span class="nav-icon">🌅</span> Briefing
+            </a>
+            <a href="/planner" class="nav-link {% if request.path == '/planner' %}active{% endif %}" id="nav-planner">
+                <span class="nav-icon">📅</span> Planner
+            </a>
+            <a href="/routine" class="nav-link {% if request.path == '/routine' %}active{% endif %}" id="nav-routine">
+                <span class="nav-icon">🔄</span> Routine
+            </a>
+            <a href="/study" class="nav-link {% if request.path == '/study' %}active{% endif %}" id="nav-study">
+                <span class="nav-icon">📚</span> Study
+            </a>
+            <a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}" id="nav-history">
+                <span class="nav-icon">📆</span> History
+            </a>
+            <a href="/notes" class="nav-link {% if request.path == '/notes' %}active{% endif %}" id="nav-notes">
+                <span class="nav-icon">📝</span> Notes
+            </a>
+            <a href="/stats" class="nav-link {% if request.path == '/stats' %}active{% endif %}" id="nav-stats">
+                <span class="nav-icon">📊</span> Stats
+            </a>
+        </div>
+        <div class="nav-date">
+            <span class="date-label">{{ today if today is defined else '' }}</span>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="/static/app.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

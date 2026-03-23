@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title_extra %} — Notes{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-md">
+    <h2 style="font-size:1.3rem; font-weight:700;">📝 Daily Notes</h2>
+    <div class="flex items-center gap-sm">
+        <input type="date" id="note-date" value="{{ today }}" onchange="loadNotes(this.value)" style="width:auto;">
+        <div class="save-indicator" id="save-indicator" style="display:none;">
+            <span class="dot"></span> Saved at <span id="save-time"></span>
+        </div>
+    </div>
+</div>
+
+<div class="notes-layout">
+    <div class="flex flex-col gap-md">
+        <!-- Full notes -->
+        <div class="card animate-in">
+            <div class="card-header">📄 Full Notes</div>
+            <textarea id="full-notes" placeholder="Write your thoughts, observations, progress notes for the day..." style="min-height:220px;">{{ note.full_notes if note else '' }}</textarea>
+        </div>
+
+        <!-- Key learnings -->
+        <div class="card animate-in delay-1">
+            <div class="card-header">💡 Key Learnings (Bullet Points)</div>
+            <textarea id="key-learnings" placeholder="- Learned about binary trees&#10;- Understood time complexity of BFS&#10;- Need to practice DP problems" style="min-height:150px;">{{ note.key_learnings if note else '' }}</textarea>
+        </div>
+    </div>
+
+    <!-- Past notes sidebar -->
+    <div class="card animate-in delay-2" style="align-self:start;">
+        <div class="card-header">📚 Past Notes</div>
+        <div class="past-notes-list">
+            {% for p in past %}
+            <div class="past-note-item" onclick="loadNotes('{{ p.date }}')">
+                <div class="pn-date">{{ p.date }}</div>
+                <div class="pn-preview">{{ p.preview or 'Empty note' }}{% if p.preview and p.preview|length >= 80 %}...{% endif %}</div>
+            </div>
+            {% endfor %}
+            {% if not past %}
+            <p style="color:var(--text-muted); font-size:.85rem; padding:12px;">No notes yet. Start writing!</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let autoSaveTimer = null;
+const fullNotes = document.getElementById('full-notes');
+const keyLearnings = document.getElementById('key-learnings');
+const noteDate = document.getElementById('note-date');
+
+function saveNotes() {
+    fetch('/api/save_notes', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            date: noteDate.value,
+            full_notes: fullNotes.value,
+            key_learnings: keyLearnings.value
+        })
+    }).then(r => r.json()).then(data => {
+        document.getElementById('save-indicator').style.display = 'flex';
+        document.getElementById('save-time').textContent = data.saved_at;
+    });
+}
+
+function startAutoSave() {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(saveNotes, 15000);
+}
+
+fullNotes.addEventListener('input', startAutoSave);
+keyLearnings.addEventListener('input', startAutoSave);
+
+// Also save on blur
+fullNotes.addEventListener('blur', saveNotes);
+keyLearnings.addEventListener('blur', saveNotes);
+
+function loadNotes(day) {
+    noteDate.value = day;
+    fetch('/api/notes/' + day).then(r => r.json()).then(data => {
+        fullNotes.value = data.full_notes || '';
+        keyLearnings.value = data.key_learnings || '';
+        if (data.last_saved) {
+            document.getElementById('save-indicator').style.display = 'flex';
+            document.getElementById('save-time').textContent = data.last_saved.split(' ')[1].slice(0,5);
+        } else {
+            document.getElementById('save-indicator').style.display = 'none';
+        }
+    });
+}
+</script>
+{% endblock %}

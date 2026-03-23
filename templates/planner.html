@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title_extra %} — Daily Planner{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-md">
+    <h2 style="font-size:1.3rem; font-weight:700;">📅 Daily Planner</h2>
+    <div class="flex gap-sm items-center">
+        <span style="font-size:.85rem; color:var(--text-secondary);">{{ today }}</span>
+        <button class="btn btn-secondary btn-sm" id="export-btn" onclick="exportDay('{{ today }}')">📤 Export</button>
+    </div>
+</div>
+
+<div class="planner-layout">
+    <!-- Hour rows -->
+    <div class="card" style="padding:0; overflow:hidden;">
+        {% for h in hours %}
+        {% set block = blocks.get(h, {}) %}
+        {% set routine = routines.get(h) %}
+        {% set is_current = (h == current_hour) %}
+        {% set is_past_undone = (h < current_hour and not block.get('is_done', false) and block.get('task_title', '') != '' and not routine) %}
+
+        <div class="hour-row
+            {% if routine %}routine-row routine-{{ routine.color }}{% endif %}
+            {% if is_current and not routine %}current{% endif %}
+            {% if is_past_undone %}past-undone{% endif %}"
+            data-hour="{{ h }}" id="hour-row-{{ h }}">
+
+            <div class="hour-label">
+                {{ '%02d'|format(h if h <= 12 else h - 12) }}:00 {{ 'AM' if h < 12 else 'PM' }}
+            </div>
+
+            {% if routine %}
+            <div class="routine-info">
+                <div class="routine-label">{{ routine.label }}</div>
+                <div class="routine-duration">{{ routine.duration_mins }} min</div>
+                <!-- Task field below routine -->
+                <div class="routine-task-field">
+                    <input type="text" class="inline-input" placeholder="Add task..."
+                        value="{{ block.get('task_title', '') }}"
+                        onchange="saveBlock('{{ today }}', {{ h }}, this.value,
+                            document.querySelector('#cat-{{ h }}') ? document.querySelector('#cat-{{ h }}').value : 'general',
+                            document.querySelector('#done-{{ h }}') ? (document.querySelector('#done-{{ h }}').checked ? 1 : 0) : 0)"
+                        style="width:100%; font-size:.8rem; padding:4px 8px; margin-top:4px;">
+                </div>
+            </div>
+            <div>
+                <span class="pill pill-{{ routine.color }}">● routine</span>
+            </div>
+            <div></div>
+            {% else %}
+            <div>
+                <input type="text" id="task-{{ h }}" placeholder="What's happening at {{ '%02d'|format(h if h <= 12 else h - 12) }}:00?"
+                    value="{{ block.get('task_title', '') }}"
+                    onchange="saveBlock('{{ today }}', {{ h }}, this.value, document.querySelector('#cat-{{ h }}').value, document.querySelector('#done-{{ h }}').checked ? 1 : 0)">
+            </div>
+            <div>
+                <select id="cat-{{ h }}" onchange="saveBlock('{{ today }}', {{ h }}, document.querySelector('#task-{{ h }}').value, this.value, document.querySelector('#done-{{ h }}').checked ? 1 : 0)">
+                    <option value="general" {% if block.get('category','general') == 'general' %}selected{% endif %}>General</option>
+                    <option value="study" {% if block.get('category') == 'study' %}selected{% endif %}>Study</option>
+                    <option value="work" {% if block.get('category') == 'work' %}selected{% endif %}>Work</option>
+                    <option value="health" {% if block.get('category') == 'health' %}selected{% endif %}>Health</option>
+                    <option value="personal" {% if block.get('category') == 'personal' %}selected{% endif %}>Personal</option>
+                </select>
+            </div>
+            <div class="checkbox-wrap">
+                <input type="checkbox" id="done-{{ h }}" {% if block.get('is_done') %}checked{% endif %}
+                    onchange="saveBlock('{{ today }}', {{ h }}, document.querySelector('#task-{{ h }}').value, document.querySelector('#cat-{{ h }}').value, this.checked ? 1 : 0)">
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Sidebar: Prep tasks -->
+    <div>
+        <div class="card">
+            <div class="card-header">📋 Today's Prep Tasks</div>
+            {% if prep_tasks %}
+            <div class="sidebar-tasks">
+                {% for t in prep_tasks %}
+                <div class="task-item" id="prep-task-{{ t.id }}">
+                    <div class="checkbox-wrap">
+                        <input type="checkbox" {% if t.id in done_ids %}checked{% endif %}
+                            onchange="saveTask('{{ today }}', {{ t.id }}, '{{ t.task_text|e }}', '{{ t.track }}', this.checked ? 1 : 0)">
+                    </div>
+                    <div>
+                        <div class="task-text"><strong>{{ t.track }}</strong>: {{ t.task_text }}</div>
+                        {% if t.sub_text %}<div class="task-sub">{{ t.sub_text }}</div>{% endif %}
+                        {% if t.time_est %}<span class="pill pill-routine" style="margin-top:4px;">{{ t.time_est }}</span>{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color:var(--text-muted); font-size:.85rem;">No prep tasks for today. Ask me to generate your weekly plan!</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

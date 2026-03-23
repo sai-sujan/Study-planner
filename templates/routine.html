@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title_extra %} — Routine Manager{% endblock %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-md">
+    <h2 style="font-size:1.3rem; font-weight:700;">🔄 Daily Routines</h2>
+    <p style="font-size:.82rem; color:var(--text-secondary);">These repeat every day automatically.</p>
+</div>
+
+<!-- Add routine form -->
+<div class="card mb-md animate-in">
+    <div class="card-header">➕ Add New Routine</div>
+    <div class="routine-form" id="add-routine-form">
+        <div>
+            <label>Time</label>
+            <input type="time" id="new-time" value="09:00">
+        </div>
+        <div>
+            <label>Duration</label>
+            <input type="number" id="new-duration" value="30" min="5" max="480" placeholder="mins">
+        </div>
+        <div>
+            <label>Label</label>
+            <input type="text" id="new-label" placeholder="e.g. Gym workout">
+        </div>
+        <div>
+            <label>Color</label>
+            <select id="new-color">
+                <option value="coral">🟠 Coral — Personal/Self-care</option>
+                <option value="amber">🟡 Amber — Food/Rest</option>
+                <option value="green">🟢 Green — Health/Exercise</option>
+                <option value="gray">⚪ Gray — Admin</option>
+            </select>
+        </div>
+        <div>
+            <label>Notes</label>
+            <input type="text" id="new-notes" placeholder="Optional notes">
+        </div>
+        <div>
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" onclick="addRoutine()">Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- Color legend -->
+<div class="flex gap-md mb-md" style="flex-wrap:wrap;">
+    <span class="pill pill-coral"><span class="color-dot coral"></span> Personal / Self-care</span>
+    <span class="pill pill-amber"><span class="color-dot amber"></span> Food / Rest</span>
+    <span class="pill pill-green"><span class="color-dot green"></span> Health / Exercise</span>
+    <span class="pill pill-gray"><span class="color-dot gray"></span> Admin</span>
+</div>
+
+<!-- Routines table -->
+<div class="card animate-in delay-1">
+    <div class="table-wrap">
+        <table id="routines-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Duration</th>
+                    <th>Label</th>
+                    <th>Color</th>
+                    <th>Notes</th>
+                    <th style="width:140px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="routines-body">
+                {% for r in routines %}
+                <tr data-id="{{ r.id }}" id="routine-row-{{ r.id }}">
+                    <td>
+                        <span class="view-mode">{{ r.start_time }}</span>
+                        <input type="time" class="edit-mode inline-input" value="{{ r.start_time }}" style="display:none;">
+                    </td>
+                    <td>
+                        <span class="view-mode">{{ r.duration_mins }} min</span>
+                        <input type="number" class="edit-mode inline-input" value="{{ r.duration_mins }}" min="5" style="display:none; width:70px;">
+                    </td>
+                    <td>
+                        <span class="view-mode">{{ r.label }}</span>
+                        <input type="text" class="edit-mode inline-input" value="{{ r.label }}" style="display:none;">
+                    </td>
+                    <td>
+                        <span class="view-mode"><span class="color-dot {{ r.color }}"></span> {{ r.color }}</span>
+                        <select class="edit-mode inline-input" style="display:none;">
+                            <option value="coral" {% if r.color == 'coral' %}selected{% endif %}>coral</option>
+                            <option value="amber" {% if r.color == 'amber' %}selected{% endif %}>amber</option>
+                            <option value="green" {% if r.color == 'green' %}selected{% endif %}>green</option>
+                            <option value="gray"  {% if r.color == 'gray'  %}selected{% endif %}>gray</option>
+                        </select>
+                    </td>
+                    <td>
+                        <span class="view-mode">{{ r.notes or '—' }}</span>
+                        <input type="text" class="edit-mode inline-input" value="{{ r.notes or '' }}" style="display:none;">
+                    </td>
+                    <td>
+                        <div class="flex gap-sm">
+                            <button class="btn btn-secondary btn-sm view-mode" onclick="startEdit({{ r.id }})">✏️ Edit</button>
+                            <button class="btn btn-primary btn-sm edit-mode" style="display:none;" onclick="saveEdit({{ r.id }})">💾 Save</button>
+                            <button class="btn btn-secondary btn-sm edit-mode" style="display:none;" onclick="cancelEdit({{ r.id }})">✖</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteRoutine({{ r.id }})">🗑</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function addRoutine() {
+    const data = {
+        start_time: document.getElementById('new-time').value,
+        duration_mins: parseInt(document.getElementById('new-duration').value),
+        label: document.getElementById('new-label').value,
+        color: document.getElementById('new-color').value,
+        notes: document.getElementById('new-notes').value,
+    };
+    if (!data.label) { alert('Please enter a label'); return; }
+    fetch('/api/routine', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(() => location.reload());
+}
+
+function startEdit(id) {
+    const row = document.getElementById('routine-row-' + id);
+    row.querySelectorAll('.view-mode').forEach(el => el.style.display = 'none');
+    row.querySelectorAll('.edit-mode').forEach(el => el.style.display = '');
+}
+
+function cancelEdit(id) {
+    const row = document.getElementById('routine-row-' + id);
+    row.querySelectorAll('.view-mode').forEach(el => el.style.display = '');
+    row.querySelectorAll('.edit-mode').forEach(el => el.style.display = 'none');
+}
+
+function saveEdit(id) {
+    const row = document.getElementById('routine-row-' + id);
+    const inputs = row.querySelectorAll('.edit-mode');
+    const data = {
+        start_time: inputs[0].value,
+        duration_mins: parseInt(inputs[1].value),
+        label: inputs[2].value,
+        color: inputs[3].value,
+        notes: inputs[4].value,
+    };
+    fetch('/api/routine/' + id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(() => location.reload());
+}
+
+function deleteRoutine(id) {
+    if (!confirm('Delete this routine?')) return;
+    fetch('/api/routine/' + id, { method: 'DELETE' })
+        .then(r => r.json()).then(() => location.reload());
+}
+</script>
+{% endblock %}
