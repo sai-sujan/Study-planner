@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { getLocalDate } from '../utils/dateUtils'
 
 export default function Notes() {
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalDate()
   const [selectedDate, setSelectedDate] = useState(today)
   const [fullNotes, setFullNotes] = useState('')
   const [keyLearnings, setKeyLearnings] = useState('')

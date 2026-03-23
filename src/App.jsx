@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { getLocalDate } from './utils/dateUtils'
 
 const tabs = [
   { to: '/',        icon: '🌅', label: 'Briefing' },
@@ -20,7 +21,7 @@ const tabs = [
 ]
 
 export default function App() {
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalDate()
 
   // FEATURE: Dark Mode Toggle
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dp_dark_mode') === '1')

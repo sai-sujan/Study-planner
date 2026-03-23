@@ -1303,20 +1303,697 @@ if __name__ == "__main__":
       {
         label: 'Easy',
         problems: [
-          { title: 'Largest Element in an Array', difficulty: 'Easy' },
-          { title: 'Second Largest Element', difficulty: 'Easy' },
-          { title: 'Check if Array is Sorted', difficulty: 'Easy' },
-          { title: 'Remove Duplicates from Sorted Array', difficulty: 'Easy' },
-          { title: 'Left Rotate an Array by One Place', difficulty: 'Easy' },
-          { title: 'Left Rotate an Array by K Places', difficulty: 'Easy' },
-          { title: 'Move Zeros to End', difficulty: 'Easy' },
-          { title: 'Linear Search', difficulty: 'Easy' },
-          { title: 'Union of Two Sorted Arrays', difficulty: 'Easy' },
-          { title: 'Find Missing Number in an Array', difficulty: 'Easy' },
-          { title: 'Maximum Consecutive Ones', difficulty: 'Easy' },
-          { title: 'Find the number that appears once', difficulty: 'Easy' },
-          { title: 'Longest Subarray with given Sum K (positives)', difficulty: 'Easy' },
-          { title: 'Longest Subarray with given Sum K (positives + negatives)', difficulty: 'Medium' },
+          {
+            title: 'Largest Element in an Array',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code> of size <code>N</code>, find and return the <b>largest element</b> in the array.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [3, 5, 2, 8, 1]
+Output: 8</pre>
+<pre>Input: arr = [10, 10, 10]
+Output: 10</pre>
+<pre>Input: arr = [-1, -5, -3]
+Output: -1</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>-10⁹ ≤ arr[i] ≤ 10⁹</li>
+</ul>`,
+            starterCode: `def largest_element(arr):
+    """Return the largest element in the array."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([3, 5, 2, 8, 1], 8),
+        ([10, 10, 10], 10),
+        ([-1, -5, -3], -1),
+        ([1], 1),
+        ([100, 200, 50, 300, 250], 300),
+    ]
+    print(f"largest_element({tests[-1][0]}) = {largest_element(tests[-1][0])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = largest_element(arr)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Second Largest Element',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code> of size <code>N</code>, find and return the <b>second largest distinct element</b>. If no second largest exists, return <code>-1</code>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [12, 35, 1, 10, 34, 1]
+Output: 34</pre>
+<pre>Input: arr = [10, 10, 10]
+Output: -1</pre>
+<pre>Input: arr = [5, 8]
+Output: 5</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>-10⁹ ≤ arr[i] ≤ 10⁹</li>
+</ul>`,
+            starterCode: `def second_largest(arr):
+    """Return the second largest distinct element, or -1 if not exists."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([12, 35, 1, 10, 34, 1], 34),
+        ([10, 10, 10], -1),
+        ([5, 8], 5),
+        ([1], -1),
+        ([7, 7, 3, 2, 7], 3),
+        ([-1, -5, -3], -3),
+    ]
+    print(f"second_largest({tests[0][0]}) = {second_largest(tests[0][0])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = second_largest(arr)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Check if Array is Sorted',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code>, check if it is sorted in <b>non-decreasing order</b>. Return <code>True</code> or <code>False</code>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 2, 3, 4, 5]
+Output: True</pre>
+<pre>Input: arr = [1, 3, 2, 4, 5]
+Output: False</pre>
+<pre>Input: arr = [5, 5, 5]
+Output: True</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+</ul>`,
+            starterCode: `def is_sorted(arr):
+    """Return True if array is sorted in non-decreasing order."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 2, 3, 4, 5], True),
+        ([1, 3, 2, 4, 5], False),
+        ([5, 5, 5], True),
+        ([1], True),
+        ([], True),
+        ([5, 4, 3, 2, 1], False),
+    ]
+    print(f"is_sorted({tests[0][0]}) = {is_sorted(tests[0][0])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = is_sorted(arr)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Remove Duplicates from Sorted Array',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given a <b>sorted</b> array <code>arr</code>, remove the duplicates <b>in-place</b> such that each element appears only once. Return the number of unique elements <code>k</code>. The first <code>k</code> elements of <code>arr</code> should hold the unique elements.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 1, 2, 2, 3]
+Output: 3, arr = [1, 2, 3, ...]</pre>
+<pre>Input: arr = [1, 1, 1]
+Output: 1, arr = [1, ...]</pre>
+<pre>Input: arr = [1, 2, 3]
+Output: 3, arr = [1, 2, 3]</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>Array is sorted in non-decreasing order</li>
+</ul>`,
+            starterCode: `def remove_duplicates(arr):
+    """Remove duplicates in-place. Return count of unique elements."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 1, 2, 2, 3], 3, [1, 2, 3]),
+        ([1, 1, 1], 1, [1]),
+        ([1, 2, 3], 3, [1, 2, 3]),
+        ([0, 0, 0, 1, 1, 2, 2, 3, 3, 4], 5, [0, 1, 2, 3, 4]),
+        ([1], 1, [1]),
+    ]
+    t = tests[0]
+    a = t[0][:]
+    print(f"remove_duplicates({t[0]}) = {remove_duplicates(a)}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp_k, exp_arr) in enumerate(tests):
+        a = arr[:]
+        got_k = remove_duplicates(a)
+        if got_k == exp_k and a[:got_k] == exp_arr:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: k={exp_k}, first k={exp_arr}")
+            print(f"  Got: k={got_k}, first k={a[:got_k] if got_k else []}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Left Rotate an Array by One Place',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code>, left rotate it by <b>one place</b>. The first element moves to the end.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 2, 3, 4, 5]
+Output: [2, 3, 4, 5, 1]</pre>
+<pre>Input: arr = [10]
+Output: [10]</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+</ul>`,
+            starterCode: `def left_rotate_one(arr):
+    """Left rotate the array by one place. Return the modified array."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 2, 3, 4, 5], [2, 3, 4, 5, 1]),
+        ([10], [10]),
+        ([1, 2], [2, 1]),
+        ([5, 4, 3, 2, 1], [4, 3, 2, 1, 5]),
+    ]
+    print(f"left_rotate_one({tests[0][0]}) = {left_rotate_one(tests[0][0][:])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = left_rotate_one(arr[:])
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Left Rotate an Array by K Places',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code> and an integer <code>k</code>, left rotate the array by <code>k</code> places.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 2, 3, 4, 5], k = 2
+Output: [3, 4, 5, 1, 2]</pre>
+<pre>Input: arr = [1, 2, 3], k = 4
+Output: [2, 3, 1]</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>0 ≤ k ≤ 10⁹</li>
+</ul>`,
+            starterCode: `def left_rotate_k(arr, k):
+    """Left rotate the array by k places. Return the modified array."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 2, 3, 4, 5], 2, [3, 4, 5, 1, 2]),
+        ([1, 2, 3], 4, [2, 3, 1]),
+        ([1, 2, 3, 4, 5], 0, [1, 2, 3, 4, 5]),
+        ([1, 2, 3, 4, 5], 5, [1, 2, 3, 4, 5]),
+        ([10, 20], 1, [20, 10]),
+    ]
+    print(f"left_rotate_k({tests[0][0]}, {tests[0][1]}) = {left_rotate_k(tests[0][0][:], tests[0][1])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, k, exp) in enumerate(tests):
+        got = left_rotate_k(arr[:], k)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}, k={k}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}, k={k}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Move Zeros to End',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code>, move all <code>0</code>s to the end while maintaining the relative order of non-zero elements. Do it <b>in-place</b>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [0, 1, 0, 3, 12]
+Output: [1, 3, 12, 0, 0]</pre>
+<pre>Input: arr = [0, 0, 0]
+Output: [0, 0, 0]</pre>
+<pre>Input: arr = [1, 2, 3]
+Output: [1, 2, 3]</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+</ul>`,
+            starterCode: `def move_zeros(arr):
+    """Move all zeros to the end in-place. Return the modified array."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([0, 1, 0, 3, 12], [1, 3, 12, 0, 0]),
+        ([0, 0, 0], [0, 0, 0]),
+        ([1, 2, 3], [1, 2, 3]),
+        ([0], [0]),
+        ([1, 0, 2, 0, 3, 0], [1, 2, 3, 0, 0, 0]),
+    ]
+    print(f"move_zeros({tests[0][0]}) = {move_zeros(tests[0][0][:])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = move_zeros(arr[:])
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Linear Search',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code> and a target <code>x</code>, return the <b>first index</b> where <code>x</code> is found. If not found, return <code>-1</code>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 2, 3, 4, 5], x = 3
+Output: 2</pre>
+<pre>Input: arr = [5, 4, 3, 2, 1], x = 6
+Output: -1</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+</ul>`,
+            starterCode: `def linear_search(arr, x):
+    """Return the first index of x in arr, or -1 if not found."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 2, 3, 4, 5], 3, 2),
+        ([5, 4, 3, 2, 1], 6, -1),
+        ([10, 20, 30], 10, 0),
+        ([10, 20, 30], 30, 2),
+        ([1, 1, 1], 1, 0),
+    ]
+    print(f"linear_search({tests[0][0]}, {tests[0][1]}) = {linear_search(tests[0][0], tests[0][1])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, x, exp) in enumerate(tests):
+        got = linear_search(arr, x)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}, x={x}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}, x={x}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Union of Two Sorted Arrays',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given two <b>sorted</b> arrays <code>a</code> and <code>b</code>, return a new sorted array containing the <b>union</b> of both (no duplicates).</p>
+
+<h3>Examples</h3>
+<pre>Input: a = [1, 2, 3, 4, 5], b = [2, 3, 4, 4, 5]
+Output: [1, 2, 3, 4, 5]</pre>
+<pre>Input: a = [1, 1, 1], b = [2, 2, 2]
+Output: [1, 2]</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N, M ≤ 10⁵</li>
+<li>Both arrays are sorted in non-decreasing order</li>
+</ul>`,
+            starterCode: `def union_sorted(a, b):
+    """Return the sorted union of two sorted arrays (no duplicates)."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 2, 3, 4, 5], [2, 3, 4, 4, 5], [1, 2, 3, 4, 5]),
+        ([1, 1, 1], [2, 2, 2], [1, 2]),
+        ([1, 2, 3], [4, 5, 6], [1, 2, 3, 4, 5, 6]),
+        ([1, 3, 5], [2, 4, 6], [1, 2, 3, 4, 5, 6]),
+        ([1], [1], [1]),
+    ]
+    print(f"union_sorted({tests[0][0]}, {tests[0][1]}) = {union_sorted(tests[0][0], tests[0][1])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (a, b, exp) in enumerate(tests):
+        got = union_sorted(a, b)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  a={a}, b={b}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  a={a}, b={b}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Find Missing Number in an Array',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code> containing <code>N-1</code> distinct integers in the range <code>[0, N]</code>, find the <b>one missing number</b>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [3, 0, 1]
+Output: 2</pre>
+<pre>Input: arr = [0, 1]
+Output: 2</pre>
+<pre>Input: arr = [9, 6, 4, 2, 3, 5, 7, 0, 1]
+Output: 8</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>All numbers are distinct</li>
+</ul>
+
+<h3>Hint</h3>
+<p>Think about the sum formula: <code>N*(N+1)/2</code>, or use XOR.</p>`,
+            starterCode: `def missing_number(arr):
+    """Find the missing number in range [0, N] where len(arr) = N-1... actually len(arr) = N and range is [0, N]."""
+    # N = len(arr), range is [0, N]
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([3, 0, 1], 2),
+        ([0, 1], 2),
+        ([9, 6, 4, 2, 3, 5, 7, 0, 1], 8),
+        ([0], 1),
+        ([1, 2, 3, 4, 5], 0),
+    ]
+    print(f"missing_number({tests[0][0]}) = {missing_number(tests[0][0])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = missing_number(arr)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Maximum Consecutive Ones',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given a binary array <code>arr</code> (containing only 0s and 1s), find the <b>maximum number of consecutive 1s</b>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 1, 0, 1, 1, 1]
+Output: 3</pre>
+<pre>Input: arr = [0, 0, 0]
+Output: 0</pre>
+<pre>Input: arr = [1, 1, 1, 1]
+Output: 4</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>arr[i] is 0 or 1</li>
+</ul>`,
+            starterCode: `def max_consecutive_ones(arr):
+    """Return the maximum number of consecutive 1s in the binary array."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 1, 0, 1, 1, 1], 3),
+        ([0, 0, 0], 0),
+        ([1, 1, 1, 1], 4),
+        ([1, 0, 1, 0, 1], 1),
+        ([0, 1, 1, 0, 1, 1, 1, 0], 3),
+    ]
+    print(f"max_consecutive_ones({tests[0][0]}) = {max_consecutive_ones(tests[0][0])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = max_consecutive_ones(arr)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Find the number that appears once',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array where every element appears <b>twice</b> except for one element which appears <b>once</b>, find that single element.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [2, 2, 1]
+Output: 1</pre>
+<pre>Input: arr = [4, 1, 2, 1, 2]
+Output: 4</pre>
+<pre>Input: arr = [1]
+Output: 1</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵ (N is always odd)</li>
+<li>Every element appears exactly twice except one</li>
+</ul>
+
+<h3>Hint</h3>
+<p>XOR of a number with itself is 0. XOR of a number with 0 is the number itself.</p>`,
+            starterCode: `def single_number(arr):
+    """Find the element that appears only once (all others appear twice)."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([2, 2, 1], 1),
+        ([4, 1, 2, 1, 2], 4),
+        ([1], 1),
+        ([3, 3, 7, 7, 10, 11, 11], 10),
+        ([5, 1, 5, 2, 2], 1),
+    ]
+    print(f"single_number({tests[0][0]}) = {single_number(tests[0][0])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, exp) in enumerate(tests):
+        got = single_number(arr)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Longest Subarray with given Sum K (positives)',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3>
+<p>Given an array of <b>positive integers</b> <code>arr</code> and a target sum <code>k</code>, find the <b>length of the longest subarray</b> whose sum equals <code>k</code>. If no such subarray exists, return <code>0</code>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [1, 2, 3, 1, 1, 1, 1], k = 3
+Output: 3  (subarray [1, 1, 1])</pre>
+<pre>Input: arr = [2, 3, 5], k = 5
+Output: 2  (subarray [2, 3])</pre>
+<pre>Input: arr = [1, 1, 1], k = 10
+Output: 0</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>1 ≤ arr[i] ≤ 10⁶ (all positive)</li>
+<li>1 ≤ k ≤ 10⁹</li>
+</ul>`,
+            starterCode: `def longest_subarray_sum_k(arr, k):
+    """Return length of longest subarray with sum equal to k (positive integers only)."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([1, 2, 3, 1, 1, 1, 1], 3, 3),
+        ([2, 3, 5], 5, 2),
+        ([1, 1, 1], 10, 0),
+        ([1, 2, 1, 3], 4, 3),
+        ([5], 5, 1),
+        ([1, 1, 1, 1, 1], 3, 3),
+    ]
+    print(f"longest_subarray_sum_k({tests[0][0]}, {tests[0][1]}) = {longest_subarray_sum_k(tests[0][0], tests[0][1])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, k, exp) in enumerate(tests):
+        got = longest_subarray_sum_k(arr, k)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}, k={k}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}, k={k}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Longest Subarray with given Sum K (positives + negatives)',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3>
+<p>Given an array <code>arr</code> (which can contain <b>positive, negative, and zero</b> values) and a target sum <code>k</code>, find the <b>length of the longest subarray</b> whose sum equals <code>k</code>.</p>
+
+<h3>Examples</h3>
+<pre>Input: arr = [2, 0, 0, 3], k = 3
+Output: 3  (subarray [0, 0, 3])</pre>
+<pre>Input: arr = [-1, 1, 1], k = 1
+Output: 3  (subarray [-1, 1, 1])</pre>
+<pre>Input: arr = [1, -1, 5, -2, 3], k = 3
+Output: 4  (subarray [1, -1, 5, -2])</pre>
+
+<h3>Constraints</h3>
+<ul>
+<li>1 ≤ N ≤ 10⁵</li>
+<li>-10⁶ ≤ arr[i] ≤ 10⁶</li>
+</ul>
+
+<h3>Hint</h3>
+<p>Use a prefix sum with a hash map. Store the first occurrence of each prefix sum.</p>`,
+            starterCode: `def longest_subarray_sum_k(arr, k):
+    """Return length of longest subarray with sum k (array can have negatives)."""
+    # Your code here
+    pass
+
+# --- Test cases (do not modify) ---
+if __name__ == "__main__":
+    tests = [
+        ([2, 0, 0, 3], 3, 3),
+        ([-1, 1, 1], 1, 3),
+        ([1, -1, 5, -2, 3], 3, 4),
+        ([1, 2, 3], 10, 0),
+        ([0, 0, 0, 0], 0, 4),
+        ([1, -1, 1, -1, 1], 0, 4),
+    ]
+    print(f"longest_subarray_sum_k({tests[0][0]}, {tests[0][1]}) = {longest_subarray_sum_k(tests[0][0], tests[0][1])}")
+    print("═══TEST_RESULTS═══")
+    all_pass = True
+    for i, (arr, k, exp) in enumerate(tests):
+        got = longest_subarray_sum_k(arr, k)
+        if got == exp:
+            print(f"Test {i+1}: PASSED ✅  arr={arr}, k={k}")
+        else:
+            all_pass = False
+            print(f"Test {i+1}: FAILED ❌  arr={arr}, k={k}")
+            print(f"  Expected: {exp}")
+            print(f"  Got: {got}")
+    if all_pass:
+        print("\\n🎉 All tests passed!")
+`,
+          },
         ],
       },
       {

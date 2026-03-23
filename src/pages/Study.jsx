@@ -5,6 +5,7 @@ import { Bar } from 'react-chartjs-2'
 // FEATURE: Link Session to Prep Task — 2026-03-19
 import { PLAN } from './PrepPlan'
 import { loadChecks, STORAGE_KEY, taskId as getTaskId } from '../data/prepData'
+import { getLocalDate } from '../utils/dateUtils'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
@@ -12,7 +13,7 @@ const trackColors = { DSA: '#2979FF', GenAI: 'rgba(41,121,255,0.7)', SysDesign: 
 const tracks = ['DSA', 'GenAI', 'SysDesign', 'DS', 'LeetCode', 'Other']
 
 export default function Study() {
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalDate()
   const [sessions, setSessions] = useState([])
   const [weeklyData, setWeeklyData] = useState({})
   const [stats, setStats] = useState(null)

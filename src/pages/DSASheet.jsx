@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { getLocalDate } from '../utils/dateUtils'
 import {
   STEPS, loadProgress, saveProgress, problemId,
   cycleStatus, STATUS_META, DIFFICULTY_COLORS, getTotalProblems,
@@ -129,7 +130,7 @@ export default function DSASheet() {
         {/* Mini Dashboard */}
         {showDashboard && (() => {
           const daily = loadDailyHistory()
-          const today = new Date().toISOString().split('T')[0]
+          const today = getLocalDate()
           const todaySolved = (daily[today] || []).length
 
           // Streak calculation (use local dates to avoid timezone issues)

@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { trackMeta, trackOrder, STORAGE_KEY, loadChecks, getTrackStats, taskId as getTaskId } from '../data/prepData'
 import { PLAN } from './PrepPlan'
+import { getLocalDate } from '../utils/dateUtils'
 
 const emojis = ['', '😴', '😐', '🙂', '😊', '🔥']
 
 export default function TodayBriefing() {
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalDate()
   const [briefing, setBriefing] = useState(null)
   const [planner, setPlanner] = useState(null)
   const [sessions, setSessions] = useState([])

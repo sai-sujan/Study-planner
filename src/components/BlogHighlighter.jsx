@@ -49,6 +49,52 @@ export default function BlogHighlighter({ storageKey, topicContext, children }) 
     applyHighlightsToDOM(contentRef.current, highlights)
   }, [highlights, children]) // eslint-disable-line
 
+  function makeHlSpan(hl, text) {
+    const span = document.createElement('span')
+    span.setAttribute('data-hl-id', hl.id)
+    span.style.cssText = `background:${hl.color};border-radius:3px;padding:1px 3px;cursor:pointer;transition:filter .15s;${hl.explanation ? 'border-bottom:2px dotted rgba(0,0,0,0.25);' : ''}`
+    span.textContent = text
+    span.onmouseenter = () => { span.style.filter = 'brightness(0.88)' }
+    span.onmouseleave = () => { span.style.filter = '' }
+    span.onclick = (e) => {
+      e.stopPropagation()
+      const hlId = span.getAttribute('data-hl-id')
+      const found = hlRef.current.find(h => h.id === hlId)
+      if (!found) return
+      const wRect = wrapperRef.current.getBoundingClientRect()
+      const sRect = span.getBoundingClientRect()
+      const posX = sRect.left - wRect.left + sRect.width / 2
+      const posY = sRect.bottom - wRect.top + 4
+      setSelPopup(null)
+      if (found.explanation) {
+        setHlPopup(null)
+        setExplainBox({ x: posX, y: posY, text: found.text, loading: false, explanation: found.explanation, hlId: found.id })
+        setChatMessages(found.chatHistory || [{ role: 'ai', text: found.explanation }])
+        setChatInput('')
+        setShowChatInput(true)
+      } else {
+        setExplainBox(null)
+        setHlPopup({ hl: found, x: posX, y: posY })
+      }
+    }
+    return span
+  }
+
+  function getTextNodes(container) {
+    const nodes = []
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const p = node.parentElement
+        if (!p) return NodeFilter.FILTER_REJECT
+        if (p.closest('pre') || p.hasAttribute('data-hl-id'))
+          return NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_ACCEPT
+      }
+    })
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    return nodes
+  }
+
   function applyHighlightsToDOM(container, hls) {
     // 1. Unwrap existing highlight spans
     container.querySelectorAll('[data-hl-id]').forEach(el => {
@@ -60,64 +106,56 @@ export default function BlogHighlighter({ storageKey, topicContext, children }) 
 
     // 2. Apply each highlight
     for (const hl of hls) {
-      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
-        acceptNode: (node) => {
-          const p = node.parentElement
-          if (!p) return NodeFilter.FILTER_REJECT
-          if (p.closest('pre') || p.hasAttribute('data-hl-id'))
-            return NodeFilter.FILTER_REJECT
-          return NodeFilter.FILTER_ACCEPT
-        }
-      })
-      const matches = []
-      while (walker.nextNode()) {
-        const node = walker.currentNode
+      const textNodes = getTextNodes(container)
+
+      // Try single-node match first
+      let found = false
+      for (let i = textNodes.length - 1; i >= 0; i--) {
+        const node = textNodes[i]
         const idx = node.textContent.indexOf(hl.text)
-        if (idx !== -1) matches.push({ node, idx })
-      }
-      for (const { node, idx } of matches.reverse()) {
-        const before = node.textContent.slice(0, idx)
-        const matchText = node.textContent.slice(idx, idx + hl.text.length)
-        const after = node.textContent.slice(idx + hl.text.length)
-
-        const span = document.createElement('span')
-        span.setAttribute('data-hl-id', hl.id)
-        span.style.cssText = `background:${hl.color};border-radius:3px;padding:1px 3px;cursor:pointer;transition:filter .15s;${hl.explanation ? 'border-bottom:2px dotted rgba(0,0,0,0.25);' : ''}`
-        span.textContent = matchText
-        span.onmouseenter = () => { span.style.filter = 'brightness(0.88)' }
-        span.onmouseleave = () => { span.style.filter = '' }
-        span.onclick = (e) => {
-          e.stopPropagation()
-          const hlId = span.getAttribute('data-hl-id')
-          const found = hlRef.current.find(h => h.id === hlId)
-          if (!found) return
-          const wRect = wrapperRef.current.getBoundingClientRect()
-          const sRect = span.getBoundingClientRect()
-          const posX = sRect.left - wRect.left + sRect.width / 2
-          const posY = sRect.bottom - wRect.top + 4
-          setSelPopup(null)
-          if (found.explanation) {
-            // Open chat box with existing explanation + full chat history
-            setHlPopup(null)
-            setExplainBox({ x: posX, y: posY, text: found.text, loading: false, explanation: found.explanation, hlId: found.id })
-            setChatMessages(found.chatHistory || [{ role: 'ai', text: found.explanation }])
-            setChatInput('')
-            setShowChatInput(true)
-          } else {
-            // No explanation — show color/remove popup
-            setExplainBox(null)
-            setHlPopup({ hl: found, x: posX, y: posY })
-          }
+        if (idx !== -1) {
+          const before = node.textContent.slice(0, idx)
+          const matchText = node.textContent.slice(idx, idx + hl.text.length)
+          const after = node.textContent.slice(idx + hl.text.length)
+          const span = makeHlSpan(hl, matchText)
+          const parent = node.parentNode
+          if (after) parent.insertBefore(document.createTextNode(after), node.nextSibling)
+          parent.insertBefore(span, node.nextSibling)
+          if (before) { node.textContent = before } else { parent.removeChild(node) }
+          found = true
+          break
         }
+      }
+      if (found) continue
 
+      // Cross-node match: text spans across <strong>, <em>, <code> etc.
+      // Build a concatenated text map from all text nodes
+      const map = [] // { node, start, end } — positions in concatenated text
+      let pos = 0
+      for (const node of textNodes) {
+        map.push({ node, start: pos, end: pos + node.textContent.length })
+        pos += node.textContent.length
+      }
+      const fullText = map.map(m => m.node.textContent).join('')
+      const matchIdx = fullText.indexOf(hl.text)
+      if (matchIdx === -1) continue
+
+      const matchEnd = matchIdx + hl.text.length
+      // Find which text nodes are involved
+      const involved = map.filter(m => m.end > matchIdx && m.start < matchEnd)
+      // Wrap each involved node's portion (process in reverse to preserve indices)
+      for (let i = involved.length - 1; i >= 0; i--) {
+        const { node, start, end } = involved[i]
+        const sliceStart = Math.max(0, matchIdx - start)
+        const sliceEnd = Math.min(node.textContent.length, matchEnd - start)
+        const before = node.textContent.slice(0, sliceStart)
+        const matchText = node.textContent.slice(sliceStart, sliceEnd)
+        const after = node.textContent.slice(sliceEnd)
+        const span = makeHlSpan(hl, matchText)
         const parent = node.parentNode
         if (after) parent.insertBefore(document.createTextNode(after), node.nextSibling)
         parent.insertBefore(span, node.nextSibling)
-        if (before) {
-          node.textContent = before
-        } else {
-          parent.removeChild(node)
-        }
+        if (before) { node.textContent = before } else { parent.removeChild(node) }
       }
     }
   }

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { trackMeta, trackOrder, loadChecks, getTrackStats } from '../data/prepData'
 import { PLAN } from './PrepPlan'
 import { STEPS, loadProgress as loadDSAProgress, problemId, getTotalProblems, getDailyStats } from '../data/dsaData'
+import { getLocalDate } from '../utils/dateUtils'
 
 const emojis = ['', '😴', '😐', '🙂', '😊', '🔥']
 
@@ -190,7 +191,7 @@ export default function Briefing() {
 
       {/* ── Today's Learning ── */}
       {(() => {
-        const todayDate = data?.today || new Date().toISOString().split('T')[0]
+        const todayDate = data?.today || getLocalDate()
         const dsaToday = getDailyStats(todayDate)
         const totalStudyHours = studySessions.reduce((s, x) => s + (x.hours || 0), 0)
         const hasActivity = dsaToday.count > 0 || studySessions.length > 0

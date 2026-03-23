@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js'
 import { Doughnut, Line, Bar } from 'react-chartjs-2'
+import { getLocalDate } from '../utils/dateUtils'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler)
 
@@ -21,7 +22,7 @@ export default function Stats() {
   const logLeet = async () => {
     const count = parseInt(leetCount)
     if (!count || count <= 0) { alert('Enter a valid number'); return }
-    const today = new Date().toISOString().split('T')[0]
+    const today = getLocalDate()
     const now = new Date().toTimeString().slice(0, 5)
     await fetch('/api/log_study', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

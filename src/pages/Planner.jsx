@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { PLAN } from './PrepPlan'
 import { taskId } from '../data/prepData'
+import { getLocalDate } from '../utils/dateUtils'
 
 const categories = ['general', 'study', 'work', 'health', 'personal']
 
 export default function Planner() {
-  const today = new Date().toISOString().split('T')[0]
+  const today = getLocalDate()
   const [data, setData] = useState(null)
 
   // FEATURE: Task Carry-Over — 2026-03-19
@@ -21,7 +22,7 @@ export default function Planner() {
 
     const yDate = new Date()
     yDate.setDate(yDate.getDate() - 1)
-    const yesterday = yDate.toISOString().split('T')[0]
+    const yesterday = getLocalDate(yDate)
     
     if (!localStorage.getItem(`dp_carryover_dismissed_${today}`)) {
       fetch(`/api/day_data/${yesterday}`).then(r => r.json()).then(yd => {

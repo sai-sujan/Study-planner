@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { getLocalDate } from '../utils/dateUtils'
 
 const HOUR_HEIGHT = 64
 const START_HOUR = 6
@@ -31,7 +32,7 @@ function getMonday(d) {
 }
 
 function dateStr(d) {
-  return d.toISOString().split('T')[0]
+  return getLocalDate(d)
 }
 
 function addDays(d, n) {

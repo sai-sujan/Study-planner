@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getDailyStats } from '../data/dsaData'
+import { getLocalDate } from '../utils/dateUtils'
 
 const emojis = ['', '😴', '😐', '🙂', '😊', '🔥']
 
@@ -30,7 +31,7 @@ export default function History() {
     const cells = []
     const current = new Date(startDate)
     while (current <= endDate) {
-      const ds = current.toISOString().split('T')[0]
+      const ds = getLocalDate(current)
       const info = dayData[ds]
       cells.push({ date: ds, day: current.getDate(), info, isPast: current <= today })
       current.setDate(current.getDate() + 1)
