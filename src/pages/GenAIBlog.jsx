@@ -334,7 +334,7 @@ export default function GenAIBlog({ section, onClose }) {
     try {
       const topicsSample = []
       section.subsections.forEach(sub => sub.items.slice(0, 4).forEach(item => topicsSample.push(item)))
-      const res = await fetch('http://localhost:5050/api/genai/blog', {
+      const res = await fetch('/api/genai/blog/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -343,9 +343,32 @@ export default function GenAIBlog({ section, onClose }) {
           topics_sample: topicsSample,
         }),
       })
-      const data = await res.json()
-      if (!res.ok || data.error) { setErrorMsg(data.error || 'Unknown error'); setStatus('error') }
-      else { setBlog(data.blog); setStatus('done') }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setErrorMsg(data.error || 'Unknown error'); setStatus('error')
+        return
+      }
+      setStatus('streaming')
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulated = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value, { stream: true })
+        for (const line of text.split('\n')) {
+          if (line.startsWith('data: ') && line !== 'data: end') {
+            try {
+              accumulated += JSON.parse(line.slice(6))
+              setBlog(accumulated)
+            } catch { /* skip malformed */ }
+          }
+          if (line === 'event: done') {
+            setStatus('done')
+          }
+        }
+      }
+      if (accumulated) setStatus('done')
     } catch (e) {
       setErrorMsg(`Network error: ${e.message}. Is the Flask server running on port 5050?`)
       setStatus('error')
@@ -403,7 +426,7 @@ export default function GenAIBlog({ section, onClose }) {
                 {copied ? '✓ Copied!' : '📋 Copy'}
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={generate} disabled={status === 'loading'}>
+            <button className="btn btn-secondary btn-sm" onClick={generate} disabled={status === 'loading' || status === 'streaming'}>
               🔄 Regenerate
             </button>
             <button
@@ -463,7 +486,7 @@ export default function GenAIBlog({ section, onClose }) {
           )}
 
           {/* Blog content */}
-          {status === 'done' && (
+          {(status === 'done' || status === 'streaming') && (
             <article>
               {/* Origin badge */}
               <div style={{

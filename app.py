@@ -100,6 +100,71 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
     return None, "no-ai-backend"
 
 
+def stream_ai_prompt(prompt, model=None):
+    """Generator that yields chunks from Claude CLI stdout in real-time.
+    Falls back to Ollama (non-streaming) if Claude is unavailable.
+    Yields SSE-formatted lines: 'data: <text>\n\n'
+    Final event: 'event: done\ndata: end\n\n'
+    """
+    import subprocess, shutil, re, json as json_mod
+
+    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    if shutil.which("claude"):
+        try:
+            cmd = ["claude", "-p", prompt]
+            if model:
+                cmd += ["--model", model]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=clean_env,
+                bufsize=1,
+            )
+            buffer = ""
+            while True:
+                char = proc.stdout.read(1)
+                if not char:
+                    break
+                buffer += char
+                # Yield every few characters for smooth streaming
+                if len(buffer) >= 3 or char in ('\n', '.', ',', '!', '?', '|', '`'):
+                    yield f"data: {json_mod.dumps(buffer)}\n\n"
+                    buffer = ""
+            if buffer:
+                yield f"data: {json_mod.dumps(buffer)}\n\n"
+            proc.wait()
+            if proc.returncode == 0:
+                yield "event: done\ndata: end\n\n"
+                return
+            # Claude failed, fall through to Ollama
+        except Exception:
+            pass
+
+    # Fallback: Ollama (non-streaming, send all at once)
+    if shutil.which("ollama"):
+        try:
+            result = subprocess.run(
+                ["ollama", "run", "qwen3.5:4b", prompt],
+                capture_output=True, text=True, timeout=120,
+                env=clean_env,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                text = re.sub(r"<think>[\s\S]*?</think>", "", result.stdout).strip()
+                # Send in small chunks to simulate streaming
+                for i in range(0, len(text), 20):
+                    yield f"data: {json_mod.dumps(text[i:i+20])}\n\n"
+                yield "event: done\ndata: end\n\n"
+                return
+        except Exception:
+            pass
+
+    yield f"data: {json_mod.dumps('[Error] No AI backend available')}\n\n"
+    yield "event: done\ndata: end\n\n"
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def get_db():
@@ -919,6 +984,39 @@ IMPORTANT RULES:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/genai/topic-blog/save", methods=["POST"])
+def api_genai_topic_blog_save():
+    """Save a streamed blog to database after streaming completes."""
+    d = request.json or {}
+    topic_name    = d.get("topic_name", "").strip()
+    section_id    = d.get("section_id", "")
+    section_title = d.get("section_title", "")
+    blog_text     = d.get("blog_text", "").strip()
+
+    if not topic_name or not blog_text:
+        return jsonify({"error": "topic_name and blog_text required"}), 400
+
+    conn = get_db()
+    now = now_str()
+    existing = conn.execute(
+        "SELECT id FROM topic_blogs WHERE topic_name=? AND section_id=?",
+        (topic_name, section_id)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE topic_blogs SET blog_content=?, updated_at=? WHERE id=?",
+            (blog_text, now, existing["id"])
+        )
+    else:
+        conn.execute(
+            "INSERT INTO topic_blogs (topic_name, section_id, section_title, blog_content, created_at) VALUES (?,?,?,?,?)",
+            (topic_name, section_id, section_title, blog_text, now)
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/genai/topic-blogs")
 def api_genai_topic_blogs_list():
     conn = get_db()
@@ -1504,6 +1602,366 @@ RULES:
     if text is None:
         return jsonify({"error": f"Failed ({source})"}), 504
     return jsonify({"ok": True, "explanation": text, "source": source})
+
+
+# ── Streaming blog endpoints ─────────────────────────────────────────────────
+
+@app.route("/api/genai/blog/stream", methods=["POST"])
+def api_genai_blog_stream():
+    d = request.json or {}
+    section_title = d.get("section_title", "")
+    subsections   = d.get("subsections", [])
+    topics_sample = d.get("topics_sample", [])
+
+    if not section_title:
+        return jsonify({"error": "section_title required"}), 400
+
+    subs_text = ", ".join(subsections) if subsections else "all aspects"
+    topics_text = "\n".join(f"- {t}" for t in topics_sample[:20]) if topics_sample else ""
+
+    # Same prompt as the non-streaming endpoint
+    prompt = f"""You are a world-class technical educator writing for AI engineers. Create a comprehensive, beautifully structured blog post about "{section_title}" as a production AI engineering topic.
+
+The section covers these areas: {subs_text}.
+
+Key topics to cover:
+{topics_text}
+
+Write using this EXACT structure. Use real markdown — it will be rendered properly:
+
+---
+
+# [Catchy, engaging title — make it memorable]
+
+> **Who is this for?** AI engineers who want to understand {section_title} deeply so they can build production-grade systems.
+
+---
+
+## 🧭 The Big Picture
+
+[2-3 sentences giving the 30,000-foot view. What problem does this solve? Use a real-world analogy.]
+
+**Think of it like this:** [One punchy analogy sentence in bold]
+
+---
+
+## 🔄 How It Works — The Flow
+
+[Show a clear flow diagram using a Mermaid code block illustrating the core process:]
+
+```mermaid
+graph LR
+    A[Input/Start] --> B[Core Process]
+    B --> C[Output/Result]
+```
+
+Use flowcharts (graph LR or graph TD), sequence diagrams, or other Mermaid diagram types as appropriate. Then explain each step in 1-2 sentences below the diagram.
+
+---
+
+## 🎯 Core Concepts — Quick Reference
+
+| Concept | What It Is | Why You Need It |
+|---------|-----------|-----------------|
+| [name]  | [1-line plain English] | [1-line reason] |
+
+Include the 6-8 most important concepts from the topic.
+
+---
+
+## 💡 Key Techniques Breakdown
+
+[For each major subsection, add a subheading and bullet points:]
+
+### [Subsection Name 1]
+- **[Technique]**: [What it does and when to use it]
+
+### [Subsection Name 2]
+- **[Technique]**: [What it does and when to use it]
+
+---
+
+## 🛠️ Real-World Example
+
+**Scenario:** [Specific real scenario]
+
+**Step-by-step:**
+1. [Step 1 with specific detail]
+2. [Step 2]
+3. [Step 3]
+
+[Add a code block or configuration example if relevant]
+
+---
+
+## ⚡ Decision Guide
+
+| Situation | Best Approach | Why |
+|-----------|---------------|-----|
+| [scenario] | [approach] | [reason] |
+
+Add 4-5 decision scenarios.
+
+---
+
+> 💬 **Quick interview tip:** If someone asks you about {section_title}, lead with the problem it solves, then the mechanism, then a real example.
+
+---
+
+## 🎤 Interview Quick-Fire Reference
+
+Use this structure to answer ANY interview question about {section_title}:
+
+IMPORTANT: Each answer MUST be in bullet points (use • for each point). NEVER write the answer as one long paragraph. Break every answer into 2-4 separate bullet points on separate lines using <br/> between them. If listing examples or types, each one MUST be on its own bullet point line.
+
+| # | Aspect | Answer |
+|---|--------|--------|
+| 1 | **Definition** | • [What is it? One crisp sentence] |
+| 2 | **Purpose** | • [Why does it exist?]<br/>• [What goal does it serve?] |
+| 3 | **Mechanism** | • [How does it work?]<br/>• [Key step 1]<br/>• [Key step 2] |
+| 4 | **Types** | • [Type 1: description]<br/>• [Type 2: description]<br/>• [Type 3: description] |
+| 5 | **Usage** | • [Use case 1]<br/>• [Use case 2]<br/>• [Use case 3] |
+| 6 | **Problem it solves** | • [The pain point]<br/>• [What happens without it] |
+| 7 | **How it solves it** | • [The key insight]<br/>• [How it works in practice] |
+| 8 | **Summary** | • [One-liner wrap up] |
+
+---
+
+IMPORTANT RULES:
+- Use Mermaid diagram syntax for ALL flow diagrams
+- Every table MUST have a header row and separator row (|---|)
+- Use **bold** for concept names throughout
+- Use `backticks` for technical terms and model names
+- Blockquotes (> text) for callouts and tips
+- The Interview Quick-Fire Reference table at the end is MANDATORY — fill every row with real, specific content
+- Target: 900-1200 words
+- Fill in ALL placeholder text with real content about {section_title} — no placeholder brackets in output"""
+
+    return Response(stream_ai_prompt(prompt), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/genai/topic-blog/stream", methods=["POST"])
+def api_genai_topic_blog_stream():
+    d = request.json or {}
+    topic_name    = d.get("topic_name", "").strip()
+    section_id    = d.get("section_id", "")
+    section_title = d.get("section_title", "")
+
+    if not topic_name:
+        return jsonify({"error": "topic_name required"}), 400
+
+    prompt = f"""You are a world-class technical educator. Write a focused, deep-dive blog post about "{topic_name}" within the context of {section_title} for AI engineers.
+
+Write using this EXACT structure in markdown:
+
+---
+
+# {topic_name}: A Deep Dive
+
+> **Who is this for?** AI engineers who want to master {topic_name} for production systems and interviews.
+
+---
+
+## 🧭 The Big Picture
+
+[2-3 sentences. What is {topic_name}? Why is it critical? Use a real-world analogy.]
+
+---
+
+## 🔍 Core Concepts
+
+[Explain the 4-6 core concepts of {topic_name}. For each:]
+- What it is
+- How it works
+- Why it matters
+
+---
+
+## 🔄 How It Works
+
+```mermaid
+graph LR
+    A[Start] --> B[Step 1]
+    B --> C[Step 2]
+    C --> D[Result]
+```
+
+[Explain the flow step by step]
+
+---
+
+## 🎯 Key Properties
+
+| Property | Details |
+|----------|---------|
+| [prop]   | [detail] |
+
+---
+
+## 💡 When to Use It
+
+- **Best for:** [specific use cases]
+- **Not ideal for:** [anti-patterns]
+- **Compared to alternatives:** [brief comparison]
+
+---
+
+## 🛠️ Practical Example
+
+**Scenario:** [Real-world scenario]
+
+**Implementation:**
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+[Code block if applicable]
+
+---
+
+## ⚠️ Common Pitfalls
+
+1. [Pitfall 1 and how to avoid it]
+2. [Pitfall 2 and how to avoid it]
+3. [Pitfall 3 and how to avoid it]
+
+---
+
+> 💬 **Interview tip:** If asked about {topic_name}, explain the core idea in one sentence, then give a concrete example, then compare with alternatives.
+
+---
+
+## 🎤 Interview Quick-Fire Reference
+
+Use this structure to answer ANY interview question about {topic_name}:
+
+IMPORTANT: Each answer MUST be in bullet points (use • for each point). NEVER write the answer as one long paragraph. Break every answer into 2-4 separate bullet points on separate lines using <br/> between them. If listing examples or types, each one MUST be on its own bullet point line.
+
+| # | Aspect | Answer |
+|---|--------|--------|
+| 1 | **Definition** | • [What is it? One crisp sentence] |
+| 2 | **Purpose** | • [Why does it exist?]<br/>• [What goal does it serve?] |
+| 3 | **Mechanism** | • [How does it work?]<br/>• [Key step 1]<br/>• [Key step 2] |
+| 4 | **Types** | • [Type 1: description]<br/>• [Type 2: description]<br/>• [Type 3: description] |
+| 5 | **Usage** | • [Use case 1]<br/>• [Use case 2]<br/>• [Use case 3] |
+| 6 | **Problem it solves** | • [The pain point]<br/>• [What happens without it] |
+| 7 | **How it solves it** | • [The key insight]<br/>• [How it works in practice] |
+| 8 | **Summary** | • [One-liner wrap up] |
+
+---
+
+IMPORTANT RULES:
+- Use Mermaid diagram syntax for ALL flow diagrams
+- Every table MUST have a header row and separator row (|---|)
+- Use **bold** for concept names
+- Use `backticks` for technical terms
+- The Interview Quick-Fire Reference table at the end is MANDATORY — fill every row with real, specific content
+- Target: 700-1000 words
+- Fill in ALL placeholders with real content about {topic_name}"""
+
+    return Response(stream_ai_prompt(prompt), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/python/blog/stream", methods=["POST"])
+def api_python_blog_stream():
+    d = request.json or {}
+    phase_title = d.get("phase_title", "")
+    topic_label = d.get("topic_label", "")
+    problem_titles = d.get("problem_titles", [])
+
+    if not topic_label:
+        return jsonify({"error": "topic_label required"}), 400
+
+    problems_text = "\n".join(f"- {t}" for t in problem_titles) if problem_titles else ""
+
+    prompt = f"""You are a friendly Python teacher. Write a blog post about "{topic_label}" from {phase_title}.
+
+VERY IMPORTANT: Use simple, everyday English. Write like you are explaining to a friend. No fancy words. Short sentences.
+
+Practice problems in this topic:
+{problems_text}
+
+Write using this EXACT structure in markdown (EVERY blog must follow this same pattern):
+
+---
+
+# [Simple, clear title about {topic_label}]
+
+> **Who is this for?** Anyone learning {topic_label} for interviews or real work.
+
+---
+
+## 🧭 The Big Picture
+
+[2-3 simple sentences. What is this? Why should I care?]
+
+---
+
+## 🔍 Core Concepts
+
+[Cover the key ideas. For each: what it is, how it works, short code example]
+
+---
+
+## 💻 Practical Examples
+
+IMPORTANT: Give at least 5-6 practical, real-world code examples.
+
+---
+
+## ⚡ Performance & Memory
+
+[How fast is it? Big-O explained simply.]
+
+---
+
+## 🏗️ Real-World Usage
+
+[3-4 real scenarios]
+
+---
+
+## ⚠️ Common Mistakes & Fixes
+
+[3-4 mistakes with wrong way and right way]
+
+---
+
+## 🎯 Interview Tips
+
+[What interviewers want to hear]
+
+---
+
+## 🎤 Interview Quick-Fire Reference
+
+IMPORTANT: Each answer MUST be in bullet points (use • for each point). Break into 2-4 separate bullet points using <br/> between them.
+
+| # | If they ask... | What I'd say |
+|---|----------------|-------------|
+| 1 | **What is it?** | • [answer]<br/>• [answer] |
+| 2 | **Why does it exist?** | • [answer]<br/>• [answer] |
+| 3 | **How does it work?** | • [answer]<br/>• [answer] |
+| 4 | **What are the types?** | • [type 1]<br/>• [type 2]<br/>• [type 3] |
+| 5 | **When do you use it?** | • [answer]<br/>• [answer] |
+| 6 | **What problem does it solve?** | • [answer]<br/>• [answer] |
+| 7 | **How does it solve it?** | • [answer]<br/>• [answer] |
+| 8 | **Sum it up** | • [answer] |
+
+---
+
+RULES:
+- SIMPLE ENGLISH ONLY
+- MUST have at least 5-6 practical code examples
+- Every blog MUST follow the EXACT same section order
+- The Quick Reference Table is MANDATORY
+- Target: 1200-1800 words
+- Fill ALL placeholders with real content about {topic_label}"""
+
+    return Response(stream_ai_prompt(prompt), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ── init + run ───────────────────────────────────────────────────────────────

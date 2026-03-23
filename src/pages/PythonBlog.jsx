@@ -160,8 +160,10 @@ export default function PythonBlog() {
   const generateBlog = async (phase, topic) => {
     const key = `${phase.id}_${topic.label}`
     setGenerating(key)
+    // Show streaming view immediately
+    setViewBlog({ phaseId: phase.id, topicLabel: topic.label, content: '', streaming: true })
     try {
-      const res = await fetch('/api/python/blog', {
+      const res = await fetch('/api/python/blog/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -170,11 +172,33 @@ export default function PythonBlog() {
           problem_titles: topic.problems.map(p => p.title),
         }),
       })
-      const data = await res.json()
-      if (data.blog) {
-        saveBlog(key, data.blog)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Error generating blog')
+        setViewBlog(null)
+        setGenerating(null)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulated = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value, { stream: true })
+        for (const line of text.split('\n')) {
+          if (line.startsWith('data: ') && line !== 'data: end') {
+            try {
+              accumulated += JSON.parse(line.slice(6))
+              setViewBlog({ phaseId: phase.id, topicLabel: topic.label, content: accumulated, streaming: true })
+            } catch { /* skip */ }
+          }
+        }
+      }
+      if (accumulated) {
+        saveBlog(key, accumulated)
         setBlogs(loadBlogs())
-        setViewBlog({ phaseId: phase.id, topicLabel: topic.label, content: data.blog })
+        setViewBlog({ phaseId: phase.id, topicLabel: topic.label, content: accumulated, streaming: false })
       }
     } catch (e) {
       alert(`Error: ${e.message}`)

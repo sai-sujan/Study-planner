@@ -139,7 +139,7 @@ export default function TopicBlog({ topicName, sectionId, sectionTitle, sectionC
 
   useEffect(() => {
     // Try loading saved blog first
-    fetch(`http://localhost:5050/api/genai/topic-blog/${encodeURIComponent(topicName)}/${encodeURIComponent(sectionId)}`)
+    fetch(`/api/genai/topic-blog/${encodeURIComponent(topicName)}/${encodeURIComponent(sectionId)}`)
       .then(r => r.json())
       .then(data => {
         if (data && data.blog_content) {
@@ -157,14 +157,43 @@ export default function TopicBlog({ topicName, sectionId, sectionTitle, sectionC
     setBlog('')
     setErrorMsg('')
     try {
-      const res = await fetch('http://localhost:5050/api/genai/topic-blog', {
+      const res = await fetch('/api/genai/topic-blog/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic_name: topicName, section_id: sectionId, section_title: sectionTitle }),
       })
-      const data = await res.json()
-      if (!res.ok || data.error) { setErrorMsg(data.error || 'Unknown error'); setStatus('error') }
-      else { setBlog(data.blog); setStatus('done') }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setErrorMsg(data.error || 'Unknown error'); setStatus('error')
+        return
+      }
+      setStatus('streaming')
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let accumulated = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value, { stream: true })
+        for (const line of text.split('\n')) {
+          if (line.startsWith('data: ') && line !== 'data: end') {
+            try {
+              accumulated += JSON.parse(line.slice(6))
+              setBlog(accumulated)
+            } catch { /* skip */ }
+          }
+          if (line === 'event: done') setStatus('done')
+        }
+      }
+      if (accumulated) {
+        setStatus('done')
+        // Auto-save to database
+        fetch('/api/genai/topic-blog/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic_name: topicName, section_id: sectionId, section_title: sectionTitle, blog_text: accumulated }),
+        }).catch(() => {})
+      }
     } catch (e) {
       setErrorMsg(`Network error: ${e.message}. Is the Flask server running on port 5050?`)
       setStatus('error')
@@ -205,7 +234,7 @@ export default function TopicBlog({ topicName, sectionId, sectionTitle, sectionC
                 📝 <span style={{ color: sectionColor }}>{topicName}</span>
               </div>
               <div style={{ fontSize: '.67rem', color: 'var(--neu-text-secondary)', fontFamily: 'monospace' }}>
-                {sectionTitle} · {status === 'done' ? 'saved' : 'generating…'}
+                {sectionTitle} · {status === 'done' ? 'saved' : status === 'streaming' ? 'streaming…' : 'generating…'}
               </div>
             </div>
           </div>
@@ -215,7 +244,7 @@ export default function TopicBlog({ topicName, sectionId, sectionTitle, sectionC
                 {copied ? '✓ Copied!' : '📋 Copy'}
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={generate} disabled={status === 'loading'}>
+            <button className="btn btn-secondary btn-sm" onClick={generate} disabled={status === 'loading' || status === 'streaming'}>
               🔄 {status === 'done' ? 'Regenerate' : 'Retry'}
             </button>
             <button
@@ -264,7 +293,7 @@ export default function TopicBlog({ topicName, sectionId, sectionTitle, sectionC
             </div>
           )}
 
-          {status === 'done' && (
+          {(status === 'done' || status === 'streaming') && (
             <article>
               <div style={{
                 display: 'inline-flex', alignItems: 'center', gap: 7,
