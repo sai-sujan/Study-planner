@@ -51,6 +51,11 @@ export default function DSAProblem() {
   const [notesWidth, setNotesWidth] = useState(280)
   const notesTimerRef = useRef(null)
 
+  // Generate problem state
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState('')
+  const [generatedData, setGeneratedData] = useState(null)
+
   // Load saved code or starter code
   useEffect(() => {
     const solutions = loadSolutions()
@@ -403,19 +408,65 @@ export default function DSAProblem() {
           boxShadow: '4px 4px 8px var(--neu-shadow-dark), -4px -4px 8px var(--neu-shadow-light)',
           overflowY: 'auto', display: 'flex', flexDirection: 'column',
         }}>
-          {problem.description ? (
+          {(problem.description || generatedData?.description) ? (
             <div style={{ fontSize: '.86rem', lineHeight: 1.8, color: 'var(--neu-text-primary)', overflow: 'hidden', wordBreak: 'break-word' }}
               className="problem-desc"
-              dangerouslySetInnerHTML={{ __html: problem.description }} />
+              dangerouslySetInnerHTML={{ __html: generatedData?.description || problem.description }} />
           ) : (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--neu-text-secondary)', textAlign: 'center' }}>
               <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>📝</div>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Problem description coming soon</div>
-              <div style={{ fontSize: '.78rem', fontFamily: 'monospace' }}>
-                We're building this together — 10/day!
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Problem description not generated yet</div>
+              <div style={{ fontSize: '.78rem', fontFamily: 'monospace', marginBottom: 20 }}>
+                Click below to auto-generate using AI
               </div>
-              <div style={{ fontSize: '.78rem', marginTop: 16, color: 'var(--neu-text-secondary)' }}>
-                For now, you can look up "{problem.title}" and start coding →
+              <button
+                className="btn btn-primary"
+                disabled={generating}
+                onClick={async () => {
+                  setGenerating(true)
+                  setGenError('')
+                  try {
+                    const res = await fetch('/api/dsa/generate-problem', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        title: problem.title,
+                        difficulty: problem.difficulty,
+                        topic_label: topic.label,
+                        step_title: step.title,
+                      }),
+                    })
+                    const data = await res.json()
+                    if (data.error && !data.description) {
+                      setGenError(data.error)
+                    } else if (data.description) {
+                      setGeneratedData(data)
+                      if (data.starterCode && !loadSolutions()[pId]) {
+                        setCode(data.starterCode)
+                        saveSolution(pId, data.starterCode)
+                      }
+                    }
+                  } catch (e) {
+                    setGenError(e.message)
+                  }
+                  setGenerating(false)
+                }}
+                style={{ fontSize: '.9rem', padding: '10px 28px' }}
+              >
+                {generating ? '⏳ Generating…' : '⚡ Generate Problem'}
+              </button>
+              {generating && (
+                <div style={{ fontSize: '.75rem', marginTop: 12, color: 'var(--neu-accent)' }}>
+                  This may take 20-30 seconds…
+                </div>
+              )}
+              {genError && (
+                <div style={{ fontSize: '.78rem', marginTop: 12, color: '#ef4444' }}>
+                  Error: {genError}
+                </div>
+              )}
+              <div style={{ fontSize: '.72rem', marginTop: 20, color: 'var(--neu-text-secondary)', opacity: 0.7 }}>
+                Or look up "{problem.title}" and start coding →
               </div>
             </div>
           )}

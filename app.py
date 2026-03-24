@@ -1084,6 +1084,114 @@ def api_dsa_run():
         except: pass
         return jsonify({"output": f"Error: {str(e)}"})
 
+# ── API: DSA Problem Generator ─────────────────────────────────────────────
+
+@app.route("/api/dsa/generate-problem", methods=["POST"])
+def api_dsa_generate_problem():
+    """Generate description + starterCode for a DSA problem using Claude, then write it into dsaData.js."""
+    import re as re_mod
+    d = request.json or {}
+    title = d.get("title", "").strip()
+    difficulty = d.get("difficulty", "Easy")
+    topic_label = d.get("topic_label", "")
+    step_title = d.get("step_title", "")
+
+    if not title:
+        return jsonify({"error": "Missing problem title"}), 400
+
+    prompt = f"""You are generating a DSA problem for a coding practice app (Python only).
+
+Problem title: "{title}"
+Difficulty: {difficulty}
+Topic: {topic_label}
+Step: {step_title}
+
+Generate TWO things as valid JSON with keys "description" and "starterCode":
+
+1. "description" — HTML string with:
+   - <h3>Problem</h3> with clear problem statement using <code> for variables/values and <b> for emphasis
+   - <h3>Examples</h3> with 2-3 examples in <pre> blocks showing Input/Output/Explanation
+   - <h3>Constraints</h3> as a <ul> list
+   - Do NOT include the title in the description
+
+2. "starterCode" — Python string with:
+   - A function stub with descriptive docstring and "pass" body
+   - A test harness after "# --- Test cases (do not modify) ---" comment
+   - Test harness should: print 2-3 sample calls, then print "═══TEST_RESULTS═══", then run 8-12 test cases
+   - Each test prints "Test N: PASSED ✅" or "Test N: FAILED ❌" with expected/got values
+   - End with: if all_pass: print("\\n🎉 All tests passed!")
+   - IMPORTANT: Include MANY edge cases! Always include:
+     * Empty input (empty array/string/0/None where applicable)
+     * Single element input
+     * Two elements
+     * All same elements / duplicates
+     * Already sorted / reverse sorted (for sorting/search problems)
+     * Negative numbers (if applicable)
+     * Very large values (near constraint limits)
+     * Minimum and maximum boundary values from constraints
+     * Special patterns (all zeros, alternating, palindromic, etc. where relevant)
+   - The function should match the problem exactly
+
+Return ONLY valid JSON, no markdown fences, no explanation. Example format:
+{{"description": "<h3>Problem</h3>...", "starterCode": "def func(...):\\n    pass\\n..."}}"""
+
+    raw, source = run_ai_prompt(prompt, timeout=180, expect_json=True)
+    if not raw:
+        return jsonify({"error": f"AI generation failed ({source})"}), 500
+
+    try:
+        import json as json_mod
+        data = json_mod.loads(raw)
+        description = data.get("description", "")
+        starter_code = data.get("starterCode", "")
+        if not description or not starter_code:
+            return jsonify({"error": "AI returned incomplete data"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Failed to parse AI response: {e}"}), 500
+
+    # Write into dsaData.js
+    dsa_path = os.path.join(os.path.dirname(__file__), "src", "data", "dsaData.js")
+    try:
+        with open(dsa_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Find the problem entry: { title: 'TITLE', difficulty: 'DIFF' }
+        # and replace with the full version including description + starterCode
+        escaped_title = title.replace("'", "\\'")
+
+        # Match the simple entry (title + difficulty only, no description)
+        pattern = re_mod.compile(
+            r"\{\s*title:\s*'" + re_mod.escape(escaped_title) + r"'\s*,\s*difficulty:\s*'" + re_mod.escape(difficulty) + r"'\s*\}",
+        )
+        match = pattern.search(content)
+        if not match:
+            # Try with double quotes or slightly different format
+            pattern2 = re_mod.compile(
+                r"\{\s*title:\s*'" + re_mod.escape(escaped_title) + r"'\s*,\s*difficulty:\s*'" + re_mod.escape(difficulty) + r"'\s*,?\s*\}",
+            )
+            match = pattern2.search(content)
+
+        if not match:
+            return jsonify({"error": "Could not find problem entry in dsaData.js", "description": description, "starterCode": starter_code}), 200
+
+        # Build the replacement — use backtick template literals for multiline
+        desc_escaped = description.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+        code_escaped = starter_code.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+
+        replacement = "{\n" + f"            title: '{escaped_title}',\n" + f"            difficulty: '{difficulty}',\n" + f"            description: `{desc_escaped}`,\n" + f"            starterCode: `{code_escaped}`,\n" + "          }"
+
+        new_content = content[:match.start()] + replacement + content[match.end():]
+
+        with open(dsa_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        return jsonify({"ok": True, "description": description, "starterCode": starter_code})
+
+    except Exception as e:
+        # Return the generated data even if file write fails
+        return jsonify({"error": f"File write failed: {e}", "description": description, "starterCode": starter_code}), 200
+
+
 # ── Interview Practice — AI Feedback ─────────────────────────────────────────
 
 @app.route("/api/interview/feedback", methods=["POST"])

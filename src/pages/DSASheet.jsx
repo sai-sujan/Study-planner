@@ -13,6 +13,7 @@ export default function DSASheet() {
   const [openSteps, setOpenSteps] = useState(new Set())
   const [search, setSearch] = useState('')
   const [showDashboard, setShowDashboard] = useState(() => localStorage.getItem('dp_dsa_dashboard_open') === '1')
+  const [generatingIds, setGeneratingIds] = useState(new Set())
 
   useEffect(() => {
     const sync = () => setProgress(loadProgress())
@@ -418,6 +419,50 @@ export default function DSASheet() {
                               borderRadius: 999, background: diff.bg, color: diff.color,
                               flexShrink: 0, fontFamily: 'monospace',
                             }}>{p.difficulty}</span>
+
+                            {/* Generate problem if no description */}
+                            {!p.description && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation()
+                                  const gId = pId
+                                  setGeneratingIds(prev => new Set([...prev, gId]))
+                                  try {
+                                    const res = await fetch('/api/dsa/generate-problem', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        title: p.title,
+                                        difficulty: p.difficulty,
+                                        topic_label: topic.label,
+                                        step_title: step.title,
+                                      }),
+                                    })
+                                    const data = await res.json()
+                                    if (data.ok) {
+                                      // Reload page to pick up new dsaData.js (dev server HMR)
+                                      window.location.reload()
+                                    }
+                                  } catch {}
+                                  setGeneratingIds(prev => { const n = new Set(prev); n.delete(gId); return n })
+                                }}
+                                disabled={generatingIds.has(pId)}
+                                title="Generate problem description & tests"
+                                style={{
+                                  width: 26, height: 26, borderRadius: '50%', border: 'none',
+                                  background: generatingIds.has(pId) ? 'var(--neu-accent-soft)' : 'var(--neu-bg)',
+                                  cursor: generatingIds.has(pId) ? 'wait' : 'pointer',
+                                  color: generatingIds.has(pId) ? 'var(--neu-accent)' : '#f59e0b',
+                                  fontSize: '.7rem',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  boxShadow: '2px 2px 4px var(--neu-shadow-dark), -2px -2px 4px var(--neu-shadow-light)',
+                                  flexShrink: 0, opacity: 0.7, transition: 'opacity .15s',
+                                  animation: generatingIds.has(pId) ? 'pulse 1.5s infinite' : 'none',
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.opacity = '1' }}
+                                onMouseLeave={e => { e.currentTarget.style.opacity = '0.7' }}
+                              >{generatingIds.has(pId) ? '⏳' : '⚡'}</button>
+                            )}
 
                             {/* Open in editor */}
                             <button
