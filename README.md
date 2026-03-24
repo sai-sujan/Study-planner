@@ -6,12 +6,13 @@ A personal daily planning, study tracking, and DSA practice web application with
 
 - **Python 3.9+**
 - **Node.js 18+** and **npm**
-- **AI Backend** (for blog generation, DSA problem generation, explanations):
-  - **Claude Code CLI** — Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (requires Anthropic API key)
-  - **Fallback — Ollama (free, local):** If Claude CLI is unavailable or fails, the app automatically falls back to Ollama. Install [Ollama](https://ollama.com), then:
-    ```bash
-    ollama pull qwen3.5:4b
-    ```
+- **AI Backend** (for blog generation, DSA problem generation, explanations). The app tries these in order and automatically falls back:
+  1. **Claude Code CLI** — Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (requires Anthropic API key)
+  2. **Groq API (free tier)** — Set `GROQ_API_KEY` env variable. Get a free key at [console.groq.com](https://console.groq.com)
+  3. **Ollama (free, local)** — Install [Ollama](https://ollama.com), then:
+     ```bash
+     ollama pull qwen3.5:4b
+     ```
 
 > **Note:** The app works fully without any AI backend — planning, scheduling, study tracking, DSA coding, and all core features work offline. AI is only needed for blog generation, problem generation, and chat explanations.
 
@@ -47,17 +48,28 @@ Open **http://localhost:5173** in your browser.
 
 ## AI Backend Setup
 
-The app tries **Claude CLI first**. If Claude is unavailable, rate-limited, or errors out, it **automatically falls back to Ollama qwen3.5:4b**. You only need one installed.
+The app tries backends in order: **Claude CLI → Groq API → Ollama**. If one fails (rate limit, not installed, error), it automatically falls back to the next. You only need **one** working.
 
-### Claude Code CLI (Primary)
+### 1. Claude Code CLI (Primary)
 
 1. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
 2. Set up your Anthropic API key
 3. The app detects the `claude` CLI automatically
 
-### Ollama (Free Fallback)
+### 2. Groq API (Free Fallback)
 
-If you don't have Claude CLI or it fails (rate limits, subscription issues), install Ollama as a free local alternative:
+If Claude CLI is unavailable or you prefer a free cloud option:
+
+1. Get a free API key at https://console.groq.com
+2. Set the environment variable:
+   ```bash
+   export GROQ_API_KEY="gsk_your_key_here"
+   ```
+3. Uses `llama-3.3-70b-versatile` model — fast and free
+
+### 3. Ollama (Free Local Fallback)
+
+If neither Claude nor Groq is available, falls back to a local model:
 
 1. Install Ollama from https://ollama.com
 2. Pull the model:
@@ -65,7 +77,6 @@ If you don't have Claude CLI or it fails (rate limits, subscription issues), ins
    ollama pull qwen3.5:4b
    ```
 3. Make sure Ollama is running (`ollama serve` or the desktop app)
-4. The app falls back to Ollama automatically when Claude is unavailable
 
 ## Tech Stack
 
@@ -77,7 +88,7 @@ If you don't have Claude CLI or it fails (rate limits, subscription issues), ins
 | Code Editor | Monaco Editor (VS Code engine) |
 | Charts | Chart.js |
 | Styling | Custom neumorphic CSS with dark mode |
-| AI | Ollama (qwen3.5:4b) or Claude CLI |
+| AI | Claude CLI → Groq API (llama-3.3-70b) → Ollama (qwen3.5:4b) |
 
 ## Features
 

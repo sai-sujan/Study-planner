@@ -13,10 +13,57 @@ app = Flask(__name__)
 CORS(app)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "planner.db")
 
-# ── AI helper — Claude CLI with Ollama fallback ─────────────────────────────
+# ── AI helper — Claude CLI → Groq API → Ollama fallback chain ────────────────
+
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+def _try_groq(prompt, timeout=120, expect_json=False):
+    """Try Groq API. Returns (text, source) or (None, reason)."""
+    import json as json_mod
+    try:
+        from urllib.request import Request, urlopen
+        from urllib.error import URLError, HTTPError
+    except ImportError:
+        return None, "no-urllib"
+
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return None, "no-groq-key"
+
+    payload = json_mod.dumps({
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 8192,
+    }).encode()
+
+    req = Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            body = json_mod.loads(resp.read().decode())
+            text = body["choices"][0]["message"]["content"].strip()
+            if text:
+                return text, f"groq-{GROQ_MODEL}"
+    except HTTPError as e:
+        return None, f"groq-http-{e.code}"
+    except (URLError, TimeoutError):
+        return None, "groq-timeout"
+    except Exception as e:
+        return None, f"groq-error: {e}"
+    return None, "groq-empty"
+
 
 def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
-    """Try Claude CLI first; if it fails (rate-limit, not found, error), fall back to Ollama qwen3.5:4b.
+    """Try Claude CLI first → Groq API → Ollama qwen3.5:4b.
     If expect_json=True, validates JSON and retries once on parse failure (helpful for smaller models).
     model: optional Claude model to use (e.g. 'claude-haiku-4-5-20251001'). If None, uses CLI default.
     """
@@ -24,8 +71,8 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
 
     clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    def _clean_ollama(raw):
-        """Strip <think> blocks and markdown fences from Ollama output."""
+    def _clean_thinking(raw):
+        """Strip <think> blocks and markdown fences from model output."""
         text = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
         return text
 
@@ -53,7 +100,7 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
                 pass
         return None
 
-    # --- Try Claude CLI first ---
+    # --- 1. Try Claude CLI first ---
     if shutil.which("claude"):
         try:
             cmd = ["claude", "-p", prompt]
@@ -66,13 +113,28 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip(), "claude"
-            # Claude failed — fall through to Ollama
         except subprocess.TimeoutExpired:
-            pass  # fall through to Ollama
+            pass
         except Exception:
-            pass  # fall through to Ollama
+            pass
 
-    # --- Fallback: Ollama qwen3.5:4b ---
+    # --- 2. Fallback: Groq API ---
+    groq_text, groq_source = _try_groq(prompt, timeout=timeout, expect_json=expect_json)
+    if groq_text:
+        if expect_json:
+            cleaned = _extract_json(_clean_thinking(groq_text))
+            if cleaned:
+                return cleaned, groq_source
+            # Bad JSON from Groq, try once more
+            groq_text2, _ = _try_groq(prompt, timeout=timeout, expect_json=True)
+            if groq_text2:
+                cleaned2 = _extract_json(_clean_thinking(groq_text2))
+                if cleaned2:
+                    return cleaned2, groq_source
+        else:
+            return _clean_thinking(groq_text), groq_source
+
+    # --- 3. Fallback: Ollama qwen3.5:4b ---
     if shutil.which("ollama"):
         max_attempts = 2 if expect_json else 1
         for attempt in range(max_attempts):
@@ -83,12 +145,11 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
                     env=clean_env,
                 )
                 if result.returncode == 0 and result.stdout.strip():
-                    text = _clean_ollama(result.stdout)
+                    text = _clean_thinking(result.stdout)
                     if expect_json:
                         cleaned = _extract_json(text)
                         if cleaned:
                             return cleaned, "ollama-qwen3.5:4b"
-                        # JSON invalid — retry if we have attempts left
                         continue
                     return text, "ollama-qwen3.5:4b"
             except subprocess.TimeoutExpired:
@@ -101,8 +162,7 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
 
 
 def stream_ai_prompt(prompt, model=None):
-    """Generator that yields chunks from Claude CLI stdout in real-time.
-    Falls back to Ollama (non-streaming) if Claude is unavailable.
+    """Generator that yields chunks from Claude CLI → Groq → Ollama.
     Yields SSE-formatted lines: 'data: <text>\n\n'
     Final event: 'event: done\ndata: end\n\n'
     """
@@ -110,6 +170,13 @@ def stream_ai_prompt(prompt, model=None):
 
     clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
+    def _send_chunks(text):
+        """Send text in small chunks to simulate streaming."""
+        for i in range(0, len(text), 20):
+            yield f"data: {json_mod.dumps(text[i:i+20])}\n\n"
+        yield "event: done\ndata: end\n\n"
+
+    # --- 1. Try Claude CLI ---
     if shutil.which("claude"):
         try:
             cmd = ["claude", "-p", prompt]
@@ -129,7 +196,6 @@ def stream_ai_prompt(prompt, model=None):
                 if not char:
                     break
                 buffer += char
-                # Yield every few characters for smooth streaming
                 if len(buffer) >= 3 or char in ('\n', '.', ',', '!', '?', '|', '`'):
                     yield f"data: {json_mod.dumps(buffer)}\n\n"
                     buffer = ""
@@ -139,11 +205,17 @@ def stream_ai_prompt(prompt, model=None):
             if proc.returncode == 0:
                 yield "event: done\ndata: end\n\n"
                 return
-            # Claude failed, fall through to Ollama
         except Exception:
             pass
 
-    # Fallback: Ollama (non-streaming, send all at once)
+    # --- 2. Fallback: Groq API ---
+    groq_text, groq_source = _try_groq(prompt, timeout=120)
+    if groq_text:
+        text = re.sub(r"<think>[\s\S]*?</think>", "", groq_text).strip()
+        yield from _send_chunks(text)
+        return
+
+    # --- 3. Fallback: Ollama ---
     if shutil.which("ollama"):
         try:
             result = subprocess.run(
@@ -153,15 +225,12 @@ def stream_ai_prompt(prompt, model=None):
             )
             if result.returncode == 0 and result.stdout.strip():
                 text = re.sub(r"<think>[\s\S]*?</think>", "", result.stdout).strip()
-                # Send in small chunks to simulate streaming
-                for i in range(0, len(text), 20):
-                    yield f"data: {json_mod.dumps(text[i:i+20])}\n\n"
-                yield "event: done\ndata: end\n\n"
+                yield from _send_chunks(text)
                 return
         except Exception:
             pass
 
-    yield f"data: {json_mod.dumps('[Error] No AI backend available')}\n\n"
+    yield f"data: {json_mod.dumps('[Error] No AI backend available. Install Claude CLI, set GROQ_API_KEY, or install Ollama.')}\n\n"
     yield "event: done\ndata: end\n\n"
 
 
