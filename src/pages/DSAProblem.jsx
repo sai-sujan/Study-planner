@@ -4,12 +4,10 @@ import Editor from '@monaco-editor/react'
 import {
   STEPS, loadProgress, saveProgress, loadSolutions, saveSolution,
   problemId, cycleStatus, STATUS_META, DIFFICULTY_COLORS,
+  syncFromDB, loadNotes, saveNote,
 } from '../data/dsaData'
-
-/* ═══ Notes storage (per-problem) ═══ */
-const DSA_NOTES_KEY = 'dp_dsa_notes_v1'
-function loadNotes() { try { return JSON.parse(localStorage.getItem(DSA_NOTES_KEY)) || {} } catch { return {} } }
-function saveNote(id, content) { const all = loadNotes(); all[id] = content; localStorage.setItem(DSA_NOTES_KEY, JSON.stringify(all)) }
+import AffirmationBanner from '../components/AffirmationBanner'
+import DSAVisualizer from '../components/DSAVisualizer'
 
 const DEFAULT_CODE = `# Write your solution here
 
@@ -33,6 +31,7 @@ export default function DSAProblem() {
 
   const [progress, setProgress] = useState(loadProgress)
   const [code, setCode] = useState('')
+  const [leftTab, setLeftTab] = useState('description') // 'description' | 'visualize'
   const [output, setOutput] = useState('')
   const [userOutput, setUserOutput] = useState('')
   const [testResults, setTestResults] = useState('')
@@ -41,6 +40,12 @@ export default function DSAProblem() {
   const [customInput, setCustomInput] = useState('')
   const [showCustom, setShowCustom] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('dp_dark_mode') === '1' ? 'vs-dark' : 'light')
+  const [outputHeight, setOutputHeight] = useState(140)
+  const [outputCollapsed, setOutputCollapsed] = useState(false)
+  const [leftPanelPct, setLeftPanelPct] = useState(() => {
+    const saved = localStorage.getItem('dp_dsa_left_pct')
+    return saved ? Number(saved) : 35
+  })
   const editorRef = useRef(null)
   const autoSaveRef = useRef(null)
 
@@ -56,14 +61,16 @@ export default function DSAProblem() {
   const [genError, setGenError] = useState('')
   const [generatedData, setGeneratedData] = useState(null)
 
-  // Load saved code or starter code
+  // Sync from DB then load saved code/notes
   useEffect(() => {
-    const solutions = loadSolutions()
-    setCode(solutions[pId] || problem?.starterCode || DEFAULT_CODE)
+    syncFromDB().then(() => {
+      const solutions = loadSolutions()
+      setCode(solutions[pId] || problem?.starterCode || DEFAULT_CODE)
+      const allNotes = loadNotes()
+      setNotes(allNotes[pId] || '')
+      setProgress(loadProgress())
+    })
     setOutput('')
-    // Load notes (always closed on open)
-    const allNotes = loadNotes()
-    setNotes(allNotes[pId] || '')
     setShowNotes(false)
   }, [pId]) // eslint-disable-line
 
@@ -260,6 +267,11 @@ export default function DSAProblem() {
       }}
       onKeyDown={handleKeyDown}
     >
+      {/* Affirmation */}
+      <div style={{ flexShrink: 0 }}>
+        <AffirmationBanner context="dsa" />
+      </div>
+
       {/* Top bar */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap', flexShrink: 0,
@@ -399,87 +411,164 @@ export default function DSAProblem() {
         )}
 
         {/* Problem + Editor container */}
-        <div style={{ flex: 1, display: 'flex', gap: 10, minWidth: 0 }}>
+        <div style={{ flex: 1, display: 'flex', gap: 0, minWidth: 0 }}>
 
-        {/* Left: Problem description */}
+        {/* Left: Problem description / Visualizer (tabbed) */}
         <div style={{
-          width: '35%', minWidth: 280,
-          background: 'var(--neu-bg)', borderRadius: 14, padding: '18px 20px',
+          width: `${leftPanelPct}%`, minWidth: 200, maxWidth: '70%',
+          background: 'var(--neu-bg)', borderRadius: 14,
           boxShadow: '4px 4px 8px var(--neu-shadow-dark), -4px -4px 8px var(--neu-shadow-light)',
-          overflowY: 'auto', display: 'flex', flexDirection: 'column',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
-          {(problem.description || generatedData?.description) ? (
-            <div style={{ fontSize: '.86rem', lineHeight: 1.8, color: 'var(--neu-text-primary)', overflow: 'hidden', wordBreak: 'break-word' }}
-              className="problem-desc"
-              dangerouslySetInnerHTML={{ __html: generatedData?.description || problem.description }} />
-          ) : (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--neu-text-secondary)', textAlign: 'center' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>📝</div>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Problem description not generated yet</div>
-              <div style={{ fontSize: '.78rem', fontFamily: 'monospace', marginBottom: 20 }}>
-                Click below to auto-generate using AI
-              </div>
+          {/* Tab bar */}
+          <div style={{
+            display: 'flex', borderBottom: '1px solid rgba(163,177,198,0.12)',
+            flexShrink: 0,
+          }}>
+            {[
+              { key: 'description', label: 'Description', icon: '📄' },
+              { key: 'visualize', label: 'Visualize', icon: '📊' },
+            ].map(tab => (
               <button
-                className="btn btn-primary"
-                disabled={generating}
-                onClick={async () => {
-                  setGenerating(true)
-                  setGenError('')
-                  try {
-                    const res = await fetch('/api/dsa/generate-problem', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        title: problem.title,
-                        difficulty: problem.difficulty,
-                        topic_label: topic.label,
-                        step_title: step.title,
-                      }),
-                    })
-                    const data = await res.json()
-                    if (data.error && !data.description) {
-                      setGenError(data.error)
-                    } else if (data.description) {
-                      setGeneratedData(data)
-                      if (data.starterCode && !loadSolutions()[pId]) {
-                        setCode(data.starterCode)
-                        saveSolution(pId, data.starterCode)
-                      }
-                    }
-                  } catch (e) {
-                    setGenError(e.message)
-                  }
-                  setGenerating(false)
+                key={tab.key}
+                onClick={() => setLeftTab(tab.key)}
+                style={{
+                  flex: 1, padding: '10px 8px', border: 'none',
+                  background: leftTab === tab.key ? `${step.color}12` : 'transparent',
+                  borderBottom: leftTab === tab.key ? `2px solid ${step.color}` : '2px solid transparent',
+                  color: leftTab === tab.key ? step.color : 'var(--neu-text-secondary)',
+                  fontSize: '.72rem', fontWeight: leftTab === tab.key ? 700 : 500,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', gap: 5, transition: 'all .15s',
+                  fontFamily: 'inherit',
                 }}
-                style={{ fontSize: '.9rem', padding: '10px 28px' }}
               >
-                {generating ? '⏳ Generating…' : '⚡ Generate Problem'}
+                {tab.icon} {tab.label}
               </button>
-              {generating && (
-                <div style={{ fontSize: '.75rem', marginTop: 12, color: 'var(--neu-accent)' }}>
-                  This may take 20-30 seconds…
+            ))}
+          </div>
+
+          {/* Tab content */}
+          {leftTab === 'description' ? (
+            <div style={{ flex: 1, padding: '18px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {(problem.description || generatedData?.description) ? (
+                <div style={{ fontSize: '.86rem', lineHeight: 1.8, color: 'var(--neu-text-primary)', overflow: 'hidden', wordBreak: 'break-word' }}
+                  className="problem-desc"
+                  dangerouslySetInnerHTML={{ __html: generatedData?.description || problem.description }} />
+              ) : (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--neu-text-secondary)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>📝</div>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Problem description not generated yet</div>
+                  <div style={{ fontSize: '.78rem', fontFamily: 'monospace', marginBottom: 20 }}>
+                    Click below to auto-generate using AI
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    disabled={generating}
+                    onClick={async () => {
+                      setGenerating(true)
+                      setGenError('')
+                      try {
+                        const res = await fetch('/api/dsa/generate-problem', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            title: problem.title,
+                            difficulty: problem.difficulty,
+                            topic_label: topic.label,
+                            step_title: step.title,
+                          }),
+                        })
+                        const data = await res.json()
+                        if (data.error && !data.description) {
+                          setGenError(data.error)
+                        } else if (data.description) {
+                          setGeneratedData(data)
+                          if (data.starterCode && !loadSolutions()[pId]) {
+                            setCode(data.starterCode)
+                            saveSolution(pId, data.starterCode)
+                          }
+                        }
+                      } catch (e) {
+                        setGenError(e.message)
+                      }
+                      setGenerating(false)
+                    }}
+                    style={{ fontSize: '.9rem', padding: '10px 28px' }}
+                  >
+                    {generating ? '⏳ Generating…' : '⚡ Generate Problem'}
+                  </button>
+                  {generating && (
+                    <div style={{ fontSize: '.75rem', marginTop: 12, color: 'var(--neu-accent)' }}>
+                      This may take 20-30 seconds…
+                    </div>
+                  )}
+                  {genError && (
+                    <div style={{ fontSize: '.78rem', marginTop: 12, color: '#ef4444' }}>
+                      Error: {genError}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '.72rem', marginTop: 20, color: 'var(--neu-text-secondary)', opacity: 0.7 }}>
+                    Or look up "{problem.title}" and start coding →
+                  </div>
                 </div>
               )}
-              {genError && (
-                <div style={{ fontSize: '.78rem', marginTop: 12, color: '#ef4444' }}>
-                  Error: {genError}
-                </div>
-              )}
-              <div style={{ fontSize: '.72rem', marginTop: 20, color: 'var(--neu-text-secondary)', opacity: 0.7 }}>
-                Or look up "{problem.title}" and start coding →
+
+              {/* Quick tips */}
+              <div style={{
+                marginTop: 'auto', paddingTop: 16,
+                borderTop: '1px solid rgba(163,177,198,0.15)',
+                fontSize: '.72rem', color: 'var(--neu-text-secondary)', fontFamily: 'monospace',
+              }}>
+                <div>⌘+S / Ctrl+S → Save</div>
+                <div>⌘+Enter / Ctrl+Enter → Run</div>
               </div>
             </div>
+          ) : (
+            <div style={{ flex: 1, padding: '12px 16px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <DSAVisualizer code={code} stepColor={step.color} />
+            </div>
           )}
+        </div>
 
-          {/* Quick tips */}
-          <div style={{
-            marginTop: 'auto', paddingTop: 16,
-            borderTop: '1px solid rgba(163,177,198,0.15)',
-            fontSize: '.72rem', color: 'var(--neu-text-secondary)', fontFamily: 'monospace',
-          }}>
-            <div>⌘+S / Ctrl+S → Save</div>
-            <div>⌘+Enter / Ctrl+Enter → Run</div>
-          </div>
+        {/* Drag handle — resize left/right split */}
+        <div
+          onMouseDown={e => {
+            e.preventDefault()
+            const container = e.currentTarget.parentElement
+            const startX = e.clientX
+            const startPct = leftPanelPct
+            const containerW = container.getBoundingClientRect().width
+            const onMove = ev => {
+              const dx = ev.clientX - startX
+              const newPct = Math.min(70, Math.max(15, startPct + (dx / containerW) * 100))
+              setLeftPanelPct(newPct)
+            }
+            const onUp = () => {
+              document.removeEventListener('mousemove', onMove)
+              document.removeEventListener('mouseup', onUp)
+              document.body.style.cursor = ''
+              document.body.style.userSelect = ''
+              localStorage.setItem('dp_dsa_left_pct', String(leftPanelPct))
+            }
+            document.body.style.cursor = 'col-resize'
+            document.body.style.userSelect = 'none'
+            document.addEventListener('mousemove', onMove)
+            document.addEventListener('mouseup', onUp)
+          }}
+          style={{
+            width: 8, flexShrink: 0, cursor: 'col-resize',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              width: 4, height: 48, borderRadius: 4,
+              background: 'rgba(163,177,198,0.25)', transition: 'background .15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = step.color}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(163,177,198,0.25)'}
+          />
         </div>
 
         {/* Right: Editor + Output */}
@@ -584,66 +673,131 @@ export default function DSAProblem() {
             />
           </div>
 
-          {/* Output panels — side by side */}
-          <div style={{ height: 200, flexShrink: 0, display: 'flex', gap: 10 }}>
-
-            {/* Your Output */}
+          {/* Drag handle to resize output */}
+          <div
+            onMouseDown={e => {
+              e.preventDefault()
+              const startY = e.clientY
+              const startH = outputHeight
+              const onMove = ev => {
+                const newH = Math.min(400, Math.max(60, startH - (ev.clientY - startY)))
+                setOutputHeight(newH)
+                setOutputCollapsed(false)
+              }
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove)
+                document.removeEventListener('mouseup', onUp)
+                document.body.style.cursor = ''
+                document.body.style.userSelect = ''
+              }
+              document.body.style.cursor = 'row-resize'
+              document.body.style.userSelect = 'none'
+              document.addEventListener('mousemove', onMove)
+              document.addEventListener('mouseup', onUp)
+            }}
+            style={{
+              height: 8, flexShrink: 0, cursor: 'row-resize',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
             <div style={{
-              flex: 1,
-              background: 'var(--neu-bg)', borderRadius: 14,
-              boxShadow: 'inset 3px 3px 6px var(--neu-shadow-dark), inset -3px -3px 6px var(--neu-shadow-light)',
-              display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            }}>
-              <div style={{
-                padding: '6px 14px', borderBottom: '1px solid rgba(163,177,198,0.12)',
-                fontSize: '.7rem', fontWeight: 700, color: 'var(--neu-text-secondary)',
-                textTransform: 'uppercase', letterSpacing: '.05em', fontFamily: 'monospace',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
+              width: 40, height: 4, borderRadius: 4,
+              background: 'rgba(163,177,198,0.25)', transition: 'background .15s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--neu-accent)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(163,177,198,0.25)'}
+            />
+          </div>
+
+          {/* Output panels — collapsible, resizable */}
+          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* Toggle bar */}
+            <div
+              onClick={() => setOutputCollapsed(c => !c)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px',
+                cursor: 'pointer', fontSize: '.65rem', fontWeight: 700,
+                color: 'var(--neu-text-secondary)', fontFamily: 'monospace',
+                textTransform: 'uppercase', letterSpacing: '.04em',
+                userSelect: 'none',
+              }}
+            >
+              <span style={{ fontSize: '.7rem' }}>{outputCollapsed ? '▸' : '▾'}</span>
+              Output
+              {(userOutput || testResults) && (
                 <span style={{
-                  width: 7, height: 7, borderRadius: '50%',
-                  background: userOutput.includes('Error') || userOutput.includes('Traceback') ? '#ef4444' : userOutput ? '#2979FF' : '#94a3b8',
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: testResults.includes('FAILED') || userOutput.includes('Error') ? '#ef4444'
+                    : testResults.includes('PASSED') ? '#22c55e' : '#2979FF',
                 }} />
-                Your Output
-              </div>
-              <pre style={{
-                flex: 1, margin: 0, padding: '10px 14px',
-                fontSize: '.78rem', fontFamily: '"JetBrains Mono", monospace',
-                color: userOutput.includes('Error') || userOutput.includes('Traceback') ? '#ef4444' : 'var(--neu-text-primary)',
-                overflowY: 'auto', whiteSpace: 'pre-wrap',
-              }}>
-                {running ? 'Running...' : userOutput || (output ? '(no direct output)' : 'Click "▶ Run" or press ⌘+Enter')}
-              </pre>
+              )}
+              <div style={{ flex: 1 }} />
+              <span style={{ fontSize: '.6rem', fontWeight: 400 }}>
+                {outputCollapsed ? 'click to expand' : `drag handle above to resize · ${outputHeight}px`}
+              </span>
             </div>
 
-            {/* Test Results */}
-            <div style={{
-              flex: 1,
-              background: 'var(--neu-bg)', borderRadius: 14,
-              boxShadow: 'inset 3px 3px 6px var(--neu-shadow-dark), inset -3px -3px 6px var(--neu-shadow-light)',
-              display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            }}>
-              <div style={{
-                padding: '6px 14px', borderBottom: '1px solid rgba(163,177,198,0.12)',
-                fontSize: '.7rem', fontWeight: 700, color: 'var(--neu-text-secondary)',
-                textTransform: 'uppercase', letterSpacing: '.05em', fontFamily: 'monospace',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                <span style={{
-                  width: 7, height: 7, borderRadius: '50%',
-                  background: testResults.includes('FAILED') ? '#ef4444' : testResults.includes('PASSED') ? '#22c55e' : '#94a3b8',
-                }} />
-                Test Results
+            {!outputCollapsed && (
+              <div style={{ height: outputHeight, display: 'flex', gap: 10 }}>
+                {/* Your Output */}
+                <div style={{
+                  flex: 1,
+                  background: 'var(--neu-bg)', borderRadius: 14,
+                  boxShadow: 'inset 3px 3px 6px var(--neu-shadow-dark), inset -3px -3px 6px var(--neu-shadow-light)',
+                  display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    padding: '6px 14px', borderBottom: '1px solid rgba(163,177,198,0.12)',
+                    fontSize: '.7rem', fontWeight: 700, color: 'var(--neu-text-secondary)',
+                    textTransform: 'uppercase', letterSpacing: '.05em', fontFamily: 'monospace',
+                    display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                  }}>
+                    <span style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: userOutput.includes('Error') || userOutput.includes('Traceback') ? '#ef4444' : userOutput ? '#2979FF' : '#94a3b8',
+                    }} />
+                    Your Output
+                  </div>
+                  <pre style={{
+                    flex: 1, margin: 0, padding: '10px 14px',
+                    fontSize: '.78rem', fontFamily: '"JetBrains Mono", monospace',
+                    color: userOutput.includes('Error') || userOutput.includes('Traceback') ? '#ef4444' : 'var(--neu-text-primary)',
+                    overflowY: 'auto', whiteSpace: 'pre-wrap',
+                  }}>
+                    {running ? 'Running...' : userOutput || (output ? '(no direct output)' : 'Click "▶ Run" or press ⌘+Enter')}
+                  </pre>
+                </div>
+
+                {/* Test Results */}
+                <div style={{
+                  flex: 1,
+                  background: 'var(--neu-bg)', borderRadius: 14,
+                  boxShadow: 'inset 3px 3px 6px var(--neu-shadow-dark), inset -3px -3px 6px var(--neu-shadow-light)',
+                  display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    padding: '6px 14px', borderBottom: '1px solid rgba(163,177,198,0.12)',
+                    fontSize: '.7rem', fontWeight: 700, color: 'var(--neu-text-secondary)',
+                    textTransform: 'uppercase', letterSpacing: '.05em', fontFamily: 'monospace',
+                    display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                  }}>
+                    <span style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: testResults.includes('FAILED') ? '#ef4444' : testResults.includes('PASSED') ? '#22c55e' : '#94a3b8',
+                    }} />
+                    Test Results
+                  </div>
+                  <pre style={{
+                    flex: 1, margin: 0, padding: '10px 14px',
+                    fontSize: '.78rem', fontFamily: '"JetBrains Mono", monospace',
+                    color: testResults.includes('FAILED') ? '#ef4444' : testResults.includes('PASSED') ? '#22c55e' : 'var(--neu-text-primary)',
+                    overflowY: 'auto', whiteSpace: 'pre-wrap',
+                  }}>
+                    {running ? 'Running...' : testResults || (output ? '(no test harness found)' : 'Tests will appear here after running')}
+                  </pre>
+                </div>
               </div>
-              <pre style={{
-                flex: 1, margin: 0, padding: '10px 14px',
-                fontSize: '.78rem', fontFamily: '"JetBrains Mono", monospace',
-                color: testResults.includes('FAILED') ? '#ef4444' : testResults.includes('PASSED') ? '#22c55e' : 'var(--neu-text-primary)',
-                overflowY: 'auto', whiteSpace: 'pre-wrap',
-              }}>
-                {running ? 'Running...' : testResults || (output ? '(no test harness found)' : 'Tests will appear here after running')}
-              </pre>
-            </div>
+            )}
           </div>
         </div>
         </div>{/* end Problem+Editor container */}

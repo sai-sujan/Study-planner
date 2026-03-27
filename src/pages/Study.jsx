@@ -6,6 +6,7 @@ import { Bar } from 'react-chartjs-2'
 import { PLAN } from './PrepPlan'
 import { loadChecks, STORAGE_KEY, taskId as getTaskId } from '../data/prepData'
 import { getLocalDate } from '../utils/dateUtils'
+import AffirmationBanner from '../components/AffirmationBanner'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
@@ -125,6 +126,7 @@ export default function Study() {
 
   return (
     <>
+      <AffirmationBanner context="study" />
       <div className="flex justify-between items-center mb-md">
         <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>📚 Study Tracker</h2>
         <div className="streak-badge">🔥 {stats?.streak || 0} day streak</div>

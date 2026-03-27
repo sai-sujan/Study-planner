@@ -4,7 +4,7 @@ import { getLocalDate } from '../utils/dateUtils'
 import {
   STEPS, loadProgress, saveProgress, problemId,
   cycleStatus, STATUS_META, DIFFICULTY_COLORS, getTotalProblems,
-  loadDailyHistory,
+  loadDailyHistory, syncFromDB,
 } from '../data/dsaData'
 
 export default function DSASheet() {
@@ -16,6 +16,8 @@ export default function DSASheet() {
   const [generatingIds, setGeneratingIds] = useState(new Set())
 
   useEffect(() => {
+    // Sync from DB on mount, then refresh state
+    syncFromDB().then(() => setProgress(loadProgress()))
     const sync = () => setProgress(loadProgress())
     window.addEventListener('storage', sync)
     return () => window.removeEventListener('storage', sync)

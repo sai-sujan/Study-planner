@@ -22,6 +22,8 @@ import PythonSheet from './pages/PythonSheet'
 import PythonProblem from './pages/PythonProblem'
 import PythonBlog from './pages/PythonBlog'
 import PythonPractice from './pages/PythonPractice'
+import SystemDesign from './pages/SystemDesign'
+import SystemDesignDetail from './pages/SystemDesignDetail'
 import InterviewPractice from './pages/InterviewPractice'
 import InterviewHistory from './pages/InterviewHistory'
 import TodayBriefing from './pages/TodayBriefing'
@@ -45,6 +47,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/stats" element={<Stats />} />
           <Route path="/genai" element={<GenAI />} />
           <Route path="/genai/:sectionId" element={<GenAIDetail />} />
+          <Route path="/systemdesign" element={<SystemDesign />} />
+          <Route path="/systemdesign/:sectionId" element={<SystemDesignDetail />} />
           <Route path="/blogs" element={<BlogLibrary />} />
           <Route path="/interview" element={<InterviewPrep />} />
           <Route path="/interview/:docId" element={<DocReader />} />

@@ -1,0 +1,20 @@
+
+> day-planner@1.0.0 dev
+> vite
+
+
+  VITE v6.4.1  ready in 259 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+7:11:55 PM [vite] (client) warning: Duplicate key "background" in object literal
+202|              overflow: 'hidden',
+203|              gridColumn: 'span 1',
+204|              background: 'linear-gradient(135deg, var(--neu-bg) 0%, var(--neu-bg) 100%)'
+   |              ^
+205|            }}
+206|            onMouseEnter={(e) => {
+
+  Plugin: vite:esbuild
+  File: /Users/saisujan/Desktop/every_day_activities/src/pages/GenAI.jsx

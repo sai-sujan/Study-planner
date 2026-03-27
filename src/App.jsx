@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { getLocalDate } from './utils/dateUtils'
+import MindsetBuddy from './components/MindsetBuddy'
 
 const tabs = [
   { to: '/',        icon: '🌅', label: 'Briefing' },
@@ -16,6 +17,7 @@ const tabs = [
   { to: '/dsa',     icon: '🗂️', label: 'DSA' },
   { to: '/python',  icon: '🐍', label: 'Python' },
   { to: '/genai',   icon: '🤖', label: 'Gen AI' },
+  { to: '/systemdesign', icon: '🏗️', label: 'Sys Design' },
   { to: '/blogs',    icon: '📚', label: 'Blogs' },
   { to: '/practice', icon: '🎙️', label: 'Practice' },
 ]
@@ -131,6 +133,9 @@ export default function App() {
       )}
 
       {/* FEATURE: Keyboard Quick Add Modal — 2026-03-19 */}
+      {/* FEATURE: Mindset Buddy */}
+      <MindsetBuddy />
+
       {showQuickAdd && (
         <div className="modal-backdrop" onClick={() => setShowQuickAdd(false)}>
           <div className="card modal-content animate-in" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>

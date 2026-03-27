@@ -9,6 +9,19 @@ from flask_cors import CORS
 import sqlite3, os
 from datetime import datetime, date, timedelta
 
+# Load .env file if present (GROQ_API_KEY etc.)
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _ef:
+        for _line in _ef:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _line = _line.removeprefix("export ")
+                _key, _, _val = _line.partition("=")
+                _val = _val.strip().strip('"').strip("'")
+                if _key and _val:
+                    os.environ.setdefault(_key.strip(), _val)
+
 app = Flask(__name__)
 CORS(app)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "planner.db")
@@ -100,45 +113,12 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
                 pass
         return None
 
-    # --- 1. Try Claude CLI first ---
-    if shutil.which("claude"):
-        try:
-            cmd = ["claude", "-p", prompt]
-            if model:
-                cmd += ["--model", model]
-            result = subprocess.run(
-                cmd,
-                capture_output=True, text=True, timeout=timeout,
-                env=clean_env,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip(), "claude"
-        except subprocess.TimeoutExpired:
-            pass
-        except Exception:
-            pass
-
-    # --- 2. Fallback: Groq API ---
-    groq_text, groq_source = _try_groq(prompt, timeout=timeout, expect_json=expect_json)
-    if groq_text:
-        if expect_json:
-            cleaned = _extract_json(_clean_thinking(groq_text))
-            if cleaned:
-                return cleaned, groq_source
-            # Bad JSON from Groq, try once more
-            groq_text2, _ = _try_groq(prompt, timeout=timeout, expect_json=True)
-            if groq_text2:
-                cleaned2 = _extract_json(_clean_thinking(groq_text2))
-                if cleaned2:
-                    return cleaned2, groq_source
-        else:
-            return _clean_thinking(groq_text), groq_source
-
-    # --- 3. Fallback: Ollama qwen3.5:4b ---
+    # --- 1. Try Ollama qwen3.5:4b first (preferred) ---
     if shutil.which("ollama"):
         max_attempts = 2 if expect_json else 1
         for attempt in range(max_attempts):
             try:
+                print(f"[AI] Ollama attempt {attempt+1}/{max_attempts}...", flush=True)
                 result = subprocess.run(
                     ["ollama", "run", "qwen3.5:4b", prompt],
                     capture_output=True, text=True, timeout=timeout + 60,
@@ -149,26 +129,76 @@ def run_ai_prompt(prompt, timeout=120, expect_json=False, model=None):
                     if expect_json:
                         cleaned = _extract_json(text)
                         if cleaned:
+                            print(f"[AI] Ollama returned valid JSON ({len(cleaned)} chars)", flush=True)
                             return cleaned, "ollama-qwen3.5:4b"
+                        print(f"[AI] Ollama JSON extraction failed, raw length={len(text)}", flush=True)
                         continue
                     return text, "ollama-qwen3.5:4b"
+                else:
+                    print(f"[AI] Ollama returncode={result.returncode}, stdout empty={not result.stdout.strip()}", flush=True)
             except subprocess.TimeoutExpired:
-                return None, "timeout"
+                print(f"[AI] Ollama timed out after {timeout+60}s", flush=True)
             except Exception as e:
-                return None, f"ollama-error: {e}"
-        return None, "ollama-bad-json"
+                print(f"[AI] Ollama error: {e}", flush=True)
 
+    # --- 2. Fallback: Groq API ---
+    print(f"[AI] Trying Groq API (key={'set' if os.environ.get('GROQ_API_KEY') else 'MISSING'})...", flush=True)
+    groq_text, groq_source = _try_groq(prompt, timeout=timeout, expect_json=expect_json)
+    if groq_text:
+        if expect_json:
+            cleaned = _extract_json(_clean_thinking(groq_text))
+            if cleaned:
+                print(f"[AI] Groq returned valid JSON ({len(cleaned)} chars)", flush=True)
+                return cleaned, groq_source
+            print(f"[AI] Groq JSON extraction failed, raw length={len(groq_text)}", flush=True)
+            # Bad JSON from Groq, try once more
+            groq_text2, _ = _try_groq(prompt, timeout=timeout, expect_json=True)
+            if groq_text2:
+                cleaned2 = _extract_json(_clean_thinking(groq_text2))
+                if cleaned2:
+                    return cleaned2, groq_source
+                print(f"[AI] Groq retry also failed JSON extraction", flush=True)
+        else:
+            return _clean_thinking(groq_text), groq_source
+    else:
+        print(f"[AI] Groq failed: {groq_source}", flush=True)
+
+    # --- 3. Fallback: Claude CLI ---
+    if shutil.which("claude"):
+        try:
+            print(f"[AI] Trying Claude CLI...", flush=True)
+            cmd = ["claude", "-p", prompt]
+            if model:
+                cmd += ["--model", model]
+            result = subprocess.run(
+                cmd,
+                capture_output=True, text=True, timeout=timeout,
+                env=clean_env,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                print(f"[AI] Claude CLI returned ({len(result.stdout)} chars)", flush=True)
+                return result.stdout.strip(), "claude"
+            else:
+                print(f"[AI] Claude CLI returncode={result.returncode}", flush=True)
+        except subprocess.TimeoutExpired:
+            print(f"[AI] Claude CLI timed out", flush=True)
+        except Exception as e:
+            print(f"[AI] Claude CLI error: {e}", flush=True)
+
+    print(f"[AI] All backends failed", flush=True)
     return None, "no-ai-backend"
 
 
 def stream_ai_prompt(prompt, model=None):
-    """Generator that yields chunks from Claude CLI → Groq → Ollama.
+    """Generator that yields chunks from Ollama → Groq → Claude CLI.
     Yields SSE-formatted lines: 'data: <text>\n\n'
     Final event: 'event: done\ndata: end\n\n'
+    Each Popen streaming backend has a 180s hard timeout to prevent hangs.
     """
-    import subprocess, shutil, re, json as json_mod
+    import subprocess, shutil, re, json as json_mod, time, signal
 
     clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    STREAM_TIMEOUT = 180  # seconds — hard kill if process hangs
 
     def _send_chunks(text):
         """Send text in small chunks to simulate streaming."""
@@ -176,37 +206,63 @@ def stream_ai_prompt(prompt, model=None):
             yield f"data: {json_mod.dumps(text[i:i+20])}\n\n"
         yield "event: done\ndata: end\n\n"
 
-    # --- 1. Try Claude CLI ---
-    if shutil.which("claude"):
+    def _stream_from_popen(cmd):
+        """Stream from a subprocess with timeout protection. Yields (chunk, done)."""
         try:
-            cmd = ["claude", "-p", prompt]
-            if model:
-                cmd += ["--model", model]
             proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=clean_env,
-                bufsize=1,
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, env=clean_env, bufsize=1,
             )
             buffer = ""
+            got_output = False
+            start = time.time()
+            import select
             while True:
+                # Timeout check
+                if time.time() - start > STREAM_TIMEOUT:
+                    proc.kill()
+                    proc.wait()
+                    return  # timed out — fall through to next backend
+
+                # Use select for non-blocking read with 2s timeout
+                ready, _, _ = select.select([proc.stdout], [], [], 2.0)
+                if not ready:
+                    # Check if process is still alive
+                    if proc.poll() is not None:
+                        break
+                    continue
+
                 char = proc.stdout.read(1)
                 if not char:
                     break
+                got_output = True
                 buffer += char
                 if len(buffer) >= 3 or char in ('\n', '.', ',', '!', '?', '|', '`'):
                     yield f"data: {json_mod.dumps(buffer)}\n\n"
                     buffer = ""
             if buffer:
                 yield f"data: {json_mod.dumps(buffer)}\n\n"
-            proc.wait()
-            if proc.returncode == 0:
+            proc.wait(timeout=5)
+            if proc.returncode == 0 and got_output:
                 yield "event: done\ndata: end\n\n"
-                return
         except Exception:
-            pass
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:
+                pass
+
+    # --- 1. Try Ollama (preferred) ---
+    if shutil.which("ollama"):
+        streamed_any = False
+        got_done = False
+        for chunk in _stream_from_popen(["ollama", "run", "qwen3.5:4b", prompt]):
+            if chunk == "event: done\ndata: end\n\n":
+                got_done = True
+            streamed_any = True
+            yield chunk
+        if got_done:
+            return
 
     # --- 2. Fallback: Groq API ---
     groq_text, groq_source = _try_groq(prompt, timeout=120)
@@ -215,22 +271,17 @@ def stream_ai_prompt(prompt, model=None):
         yield from _send_chunks(text)
         return
 
-    # --- 3. Fallback: Ollama ---
-    if shutil.which("ollama"):
-        try:
-            result = subprocess.run(
-                ["ollama", "run", "qwen3.5:4b", prompt],
-                capture_output=True, text=True, timeout=120,
-                env=clean_env,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                text = re.sub(r"<think>[\s\S]*?</think>", "", result.stdout).strip()
-                yield from _send_chunks(text)
+    # --- 3. Fallback: Claude CLI ---
+    if shutil.which("claude"):
+        cmd = ["claude", "-p", prompt]
+        if model:
+            cmd += ["--model", model]
+        for chunk in _stream_from_popen(cmd):
+            yield chunk
+            if chunk == "event: done\ndata: end\n\n":
                 return
-        except Exception:
-            pass
 
-    yield f"data: {json_mod.dumps('[Error] No AI backend available. Install Claude CLI, set GROQ_API_KEY, or install Ollama.')}\n\n"
+    yield f"data: {json_mod.dumps('[Error] No AI backend available. Install Ollama, set GROQ_API_KEY, or install Claude CLI.')}\n\n"
     yield "event: done\ndata: end\n\n"
 
 
@@ -338,6 +389,27 @@ def init_db():
             score INTEGER DEFAULT 0,
             duration_sec INTEGER DEFAULT 0,
             created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS dsa_progress (
+            problem_id TEXT PRIMARY KEY,
+            status INTEGER DEFAULT 0,
+            solved_at TEXT,
+            updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS dsa_daily (
+            date TEXT NOT NULL,
+            problem_id TEXT NOT NULL,
+            PRIMARY KEY (date, problem_id)
+        );
+        CREATE TABLE IF NOT EXISTS dsa_solutions (
+            problem_id TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS dsa_notes (
+            problem_id TEXT PRIMARY KEY,
+            content TEXT NOT NULL,
+            updated_at TEXT
         );
     """)
     if cur.execute("SELECT COUNT(*) FROM routines").fetchone()[0] == 0:
@@ -855,31 +927,11 @@ IMPORTANT RULES:
 - Target: 900-1200 words
 - Fill in ALL placeholder text with real content about {section_title} — no placeholder brackets in output"""
 
-    # Clean env to avoid nested Claude Code session error
-    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    blog_text, source = run_ai_prompt(prompt, timeout=120)
+    if not blog_text:
+        return jsonify({"error": f"All AI backends failed ({source}). Check Ollama/Groq/Claude."}), 500
 
-    try:
-        result = subprocess.run(
-            ["claude", "-p", prompt],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=clean_env,
-        )
-        if result.returncode != 0:
-            err = result.stderr.strip() or "claude exited with a non-zero status"
-            return jsonify({"error": err}), 500
-
-        blog_text = result.stdout.strip()
-        if not blog_text:
-            return jsonify({"error": "Claude returned an empty response"}), 500
-
-        return jsonify({"ok": True, "blog": blog_text})
-
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Claude took too long (>120s). Try again."}), 504
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "blog": blog_text, "source": source})
 
 
 # ── API: Topic Blog (per-item blog generation + persistence) ────────────────
@@ -1011,47 +1063,31 @@ IMPORTANT RULES:
 - Target: 700-1000 words
 - Fill in ALL placeholders with real content about {topic_name}"""
 
-    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    blog_text, source = run_ai_prompt(prompt, timeout=120)
+    if not blog_text:
+        return jsonify({"error": f"All AI backends failed ({source}). Check Ollama/Groq/Claude."}), 500
 
-    try:
-        result = subprocess.run(
-            ["claude", "-p", prompt],
-            capture_output=True, text=True, timeout=120,
-            env=clean_env,
+    # Auto-save to database
+    conn = get_db()
+    now = now_str()
+    existing = conn.execute(
+        "SELECT id FROM topic_blogs WHERE topic_name=? AND section_id=?",
+        (topic_name, section_id)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE topic_blogs SET blog_content=?, updated_at=? WHERE id=?",
+            (blog_text, now, existing["id"])
         )
-        if result.returncode != 0:
-            return jsonify({"error": result.stderr.strip() or "claude exited with non-zero status"}), 500
+    else:
+        conn.execute(
+            "INSERT INTO topic_blogs (topic_name, section_id, section_title, blog_content, created_at) VALUES (?,?,?,?,?)",
+            (topic_name, section_id, section_title, blog_text, now)
+        )
+    conn.commit()
+    conn.close()
 
-        blog_text = result.stdout.strip()
-        if not blog_text:
-            return jsonify({"error": "Claude returned an empty response"}), 500
-
-        # Auto-save to database
-        conn = get_db()
-        now = now_str()
-        existing = conn.execute(
-            "SELECT id FROM topic_blogs WHERE topic_name=? AND section_id=?",
-            (topic_name, section_id)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE topic_blogs SET blog_content=?, updated_at=? WHERE id=?",
-                (blog_text, now, existing["id"])
-            )
-        else:
-            conn.execute(
-                "INSERT INTO topic_blogs (topic_name, section_id, section_title, blog_content, created_at) VALUES (?,?,?,?,?)",
-                (topic_name, section_id, section_title, blog_text, now)
-            )
-        conn.commit()
-        conn.close()
-
-        return jsonify({"ok": True, "blog": blog_text})
-
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Claude took too long (>120s). Try again."}), 504
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "blog": blog_text, "source": source})
 
 @app.route("/api/genai/topic-blog/save", methods=["POST"])
 def api_genai_topic_blog_save():
@@ -1115,6 +1151,176 @@ def api_genai_topic_blog_delete(blog_id):
     conn.close()
     return jsonify({"ok": True})
 
+# ── API: DSA Progress Tracking ──────────────────────────────────────────────
+
+@app.route("/api/dsa/progress", methods=["GET"])
+def api_dsa_progress_get():
+    """Return all DSA problem statuses from DB."""
+    conn = get_db()
+    rows = conn.execute("SELECT problem_id, status FROM dsa_progress").fetchall()
+    conn.close()
+    return jsonify({r["problem_id"]: r["status"] for r in rows})
+
+@app.route("/api/dsa/progress", methods=["POST"])
+def api_dsa_progress_save():
+    """Save a single problem's status. Auto-log to study_log when solved (status=2)."""
+    d = request.json or {}
+    pid = d.get("problem_id", "")
+    status = d.get("status", 0)
+    if not pid:
+        return jsonify({"error": "Missing problem_id"}), 400
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    td = today_str()
+    conn = get_db()
+
+    # Check previous status to avoid duplicate logging
+    prev = conn.execute("SELECT status FROM dsa_progress WHERE problem_id=?", (pid,)).fetchone()
+    prev_status = prev["status"] if prev else 0
+
+    # Upsert progress
+    conn.execute("""
+        INSERT INTO dsa_progress (problem_id, status, updated_at, solved_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(problem_id) DO UPDATE SET
+            status=excluded.status,
+            updated_at=excluded.updated_at,
+            solved_at=CASE WHEN excluded.status=2 THEN excluded.solved_at ELSE dsa_progress.solved_at END
+    """, (pid, status, now, now if status == 2 else None))
+
+    # Auto-log to study_log when newly solved (wasn't solved before)
+    if status == 2 and prev_status != 2:
+        # Extract a readable topic from problem_id (e.g. s2_t1_p1)
+        topic_label = d.get("topic", pid)
+        cur_time = datetime.now().strftime("%H:%M")
+
+        # Check if there's already a DSA study entry for today to avoid spam
+        existing = conn.execute(
+            "SELECT id, hours, topic FROM study_log WHERE date=? AND track='DSA' ORDER BY id DESC LIMIT 1",
+            (td,)
+        ).fetchone()
+
+        if existing:
+            # Update existing entry: increment hours and append topic
+            new_hours = round(existing["hours"] + 0.5, 1)
+            old_topic = existing["topic"] or ""
+            topics = [t.strip() for t in old_topic.split(",") if t.strip()]
+            if topic_label not in topics:
+                topics.append(topic_label)
+            conn.execute(
+                "UPDATE study_log SET hours=?, end_time=?, topic=? WHERE id=?",
+                (new_hours, cur_time, ", ".join(topics[-5:]), existing["id"])
+            )
+        else:
+            # Create new study log entry for DSA
+            conn.execute(
+                "INSERT INTO study_log (date, start_time, end_time, track, topic, hours) VALUES (?,?,?,?,?,?)",
+                (td, cur_time, cur_time, "DSA", topic_label, 0.5)
+            )
+
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/dsa/progress/bulk", methods=["POST"])
+def api_dsa_progress_bulk():
+    """Bulk import progress from localStorage (initial sync)."""
+    d = request.json or {}
+    progress = d.get("progress", {})
+    if not progress:
+        return jsonify({"ok": True, "imported": 0})
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    count = 0
+    for pid, status in progress.items():
+        s = int(status) if status else 0
+        if s > 0:
+            conn.execute("""
+                INSERT INTO dsa_progress (problem_id, status, updated_at, solved_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(problem_id) DO UPDATE SET
+                    status=MAX(dsa_progress.status, excluded.status),
+                    updated_at=excluded.updated_at,
+                    solved_at=CASE WHEN excluded.status=2 THEN excluded.solved_at ELSE dsa_progress.solved_at END
+            """, (pid, s, now, now if s == 2 else None))
+            count += 1
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "imported": count})
+
+# ── API: DSA Daily / Solutions / Notes ───────────────────────────────────────
+
+@app.route("/api/dsa/daily", methods=["GET"])
+def api_dsa_daily_get():
+    """Return daily solve history as {date: [problem_ids]}."""
+    conn = get_db()
+    rows = conn.execute("SELECT date, problem_id FROM dsa_daily ORDER BY date").fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        result.setdefault(r["date"], []).append(r["problem_id"])
+    return jsonify(result)
+
+
+@app.route("/api/dsa/solutions", methods=["GET"])
+def api_dsa_solutions_get():
+    """Return all saved solutions as {problem_id: code}."""
+    conn = get_db()
+    rows = conn.execute("SELECT problem_id, code FROM dsa_solutions").fetchall()
+    conn.close()
+    return jsonify({r["problem_id"]: r["code"] for r in rows})
+
+
+@app.route("/api/dsa/solutions", methods=["POST"])
+def api_dsa_solutions_save():
+    """Save a solution for a problem."""
+    d = request.json or {}
+    pid = d.get("problem_id", "")
+    code = d.get("code", "")
+    if not pid:
+        return jsonify({"error": "Missing problem_id"}), 400
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO dsa_solutions (problem_id, code, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(problem_id) DO UPDATE SET code=excluded.code, updated_at=excluded.updated_at
+    """, (pid, code, now))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/dsa/notes", methods=["GET"])
+def api_dsa_notes_get():
+    """Return all notes as {problem_id: content}."""
+    conn = get_db()
+    rows = conn.execute("SELECT problem_id, content FROM dsa_notes").fetchall()
+    conn.close()
+    return jsonify({r["problem_id"]: r["content"] for r in rows})
+
+
+@app.route("/api/dsa/notes", methods=["POST"])
+def api_dsa_notes_save():
+    """Save a note for a problem."""
+    d = request.json or {}
+    pid = d.get("problem_id", "")
+    content = d.get("content", "")
+    if not pid:
+        return jsonify({"error": "Missing problem_id"}), 400
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO dsa_notes (problem_id, content, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(problem_id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at
+    """, (pid, content, now))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 # ── API: DSA Code Runner ────────────────────────────────────────────────────
 
 @app.route("/api/dsa/run", methods=["POST"])
@@ -1152,6 +1358,187 @@ def api_dsa_run():
         try: os.unlink(tmp_path)
         except: pass
         return jsonify({"output": f"Error: {str(e)}"})
+
+# ── API: DSA Visualizer ────────────────────────────────────────────────────
+
+@app.route("/api/dsa/visualize", methods=["POST"])
+def api_dsa_visualize():
+    """Run user code with tracing to capture array/pointer states for visualization."""
+    import subprocess, tempfile, json as json_mod
+    import re as re_viz
+
+    d = request.json or {}
+    code = d.get("code", "")
+    custom_input = d.get("customInput", "")
+
+    if not code.strip():
+        return jsonify({"error": "No code provided", "snapshots": []})
+
+    # Strip test harness (everything after # --- Test cases)
+    marker = "# --- Test cases"
+    idx = code.find(marker)
+    func_code = code[:idx] if idx != -1 else code
+
+    # Try to extract a realistic sample call from test harness
+    test_section = code[idx:] if idx != -1 else ""
+    extracted_args = None
+    if test_section:
+        call_match = re_viz.search(r'\w+\(\s*(\[[\d,\s\.\-]+\])(?:\s*,\s*([^)]+))?\s*\)', test_section)
+        if call_match:
+            inner = re_viz.search(r'\((.+)\)', call_match.group(0))
+            if inner:
+                extracted_args = inner.group(1)
+
+    # Names that should never be treated as pointers
+    IGNORE_PTRS = {'n', 'N', 'size', 'length', 'len_', 'count', 'total',
+                   'ans', 'result', 'res', 'ret', 'output', 'sum_', 'max_val',
+                   'min_val', 'target', 'k'}
+
+    wrapper = '''
+import sys, json, copy
+
+_viz_snapshots = []
+_viz_prev_arrays = {}
+_viz_prev_pointers = {}
+_viz_max_snaps = 300
+_viz_src_file = None
+_viz_ignore_ptrs = ''' + repr(IGNORE_PTRS) + '''
+
+def _viz_trace(frame, event, arg):
+    if len(_viz_snapshots) >= _viz_max_snaps:
+        sys.settrace(None)
+        return None
+    if event != 'line':
+        return _viz_trace
+    fn = frame.f_code.co_filename
+    if _viz_src_file and fn != _viz_src_file:
+        return _viz_trace
+
+    arrays = {}
+    pointers = {}
+    for name, val in frame.f_locals.items():
+        if name.startswith('_viz_') or name.startswith('__'):
+            continue
+        if isinstance(val, list) and len(val) <= 200:
+            if all(isinstance(x, (int, float)) for x in val):
+                arrays[name] = list(val)
+        elif isinstance(val, int) and not isinstance(val, bool):
+            if name not in _viz_ignore_ptrs:
+                pointers[name] = val
+
+    if not arrays:
+        return _viz_trace
+
+    arrays_changed = (arrays != _viz_prev_arrays)
+    pointers_changed = (pointers != _viz_prev_pointers)
+    if not arrays_changed and not pointers_changed:
+        return _viz_trace
+
+    highlights = {}
+    for name, arr in arrays.items():
+        prev = _viz_prev_arrays.get(name, [])
+        changed = []
+        for i in range(len(arr)):
+            if i >= len(prev) or arr[i] != prev[i]:
+                changed.append(i)
+        highlights[name] = changed
+
+    # Only include pointers whose value is a valid index for some array
+    relevant_ptrs = {}
+    for pname, pval in pointers.items():
+        for aname, arr in arrays.items():
+            if 0 <= pval < len(arr):
+                relevant_ptrs[pname] = pval
+                break
+
+    moved_ptrs = []
+    for pname, pval in relevant_ptrs.items():
+        prev_val = _viz_prev_pointers.get(pname)
+        if prev_val is None or prev_val != pval:
+            moved_ptrs.append(pname)
+
+    _viz_snapshots.append({
+        'line': frame.f_lineno,
+        'arrays': copy.deepcopy(arrays),
+        'highlights': highlights,
+        'pointers': relevant_ptrs,
+        'movedPointers': moved_ptrs,
+        'arrayChanged': arrays_changed,
+    })
+    _viz_prev_arrays.update(copy.deepcopy(arrays))
+    _viz_prev_pointers.update(copy.deepcopy(pointers))
+
+    return _viz_trace
+
+''' + func_code + '''
+
+import inspect as _insp
+_viz_funcs = [(n, f) for n, f in list(locals().items())
+              if callable(f) and not n.startswith('_') and hasattr(f, '__code__')]
+
+if _viz_funcs:
+    _fn_name, _fn = _viz_funcs[-1]
+    _params = _insp.signature(_fn).parameters
+    _nargs = sum(1 for p in _params.values()
+                 if p.default is _insp.Parameter.empty)
+
+    _viz_src_file = _fn.__code__.co_filename
+    sys.settrace(_viz_trace)
+    try:
+'''
+
+    # Determine call expression
+    if custom_input.strip():
+        wrapper += f'        _fn({custom_input})\n'
+    elif extracted_args:
+        wrapper += f'        _fn({extracted_args})\n'
+    else:
+        wrapper += '''        if _nargs == 1:
+            _fn([5, 3, 8, 1, 9, 2, 7, 4, 6])
+        elif _nargs == 2:
+            _fn([5, 3, 8, 1, 9, 2, 7, 4, 6], 5)
+        elif _nargs == 0:
+            _fn()
+'''
+
+    wrapper += '''    except Exception:
+        pass
+    sys.settrace(None)
+
+print("===VIZ_JSON===")
+print(json.dumps(_viz_snapshots))
+'''
+
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(wrapper)
+            tmp_path = f.name
+
+        result = subprocess.run(
+            ["python3", tmp_path],
+            capture_output=True, text=True, timeout=10,
+        )
+
+        os.unlink(tmp_path)
+
+        output = result.stdout
+        sep = "===VIZ_JSON==="
+        if sep in output:
+            json_part = output.split(sep)[1].strip()
+            snapshots = json_mod.loads(json_part)
+            return jsonify({"snapshots": snapshots})
+        else:
+            err = result.stderr or output or "No visualization data produced"
+            return jsonify({"error": err.strip(), "snapshots": []})
+
+    except subprocess.TimeoutExpired:
+        try: os.unlink(tmp_path)
+        except: pass
+        return jsonify({"error": "Timeout — code took too long", "snapshots": []})
+    except Exception as e:
+        try: os.unlink(tmp_path)
+        except: pass
+        return jsonify({"error": str(e), "snapshots": []})
 
 # ── API: DSA Problem Generator ─────────────────────────────────────────────
 
@@ -1304,16 +1691,10 @@ Provide feedback in this exact format:
 Keep feedback concise and actionable."""
 
     try:
-        clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-        result = subprocess.run(
-            ["claude", "-p", prompt],
-            capture_output=True, text=True, timeout=60,
-            env=clean_env,
-        )
-        feedback = result.stdout.strip()
-        if result.returncode != 0 or not feedback:
-            feedback = result.stderr.strip() or "Failed to generate feedback. Please try again."
-        return jsonify({"feedback": feedback})
+        feedback, source = run_ai_prompt(prompt, timeout=60)
+        if not feedback:
+            feedback = "Failed to generate feedback — all AI backends unavailable. Please try again."
+        return jsonify({"feedback": feedback, "source": source})
     except subprocess.TimeoutExpired:
         return jsonify({"feedback": "⏰ Feedback generation timed out. Please try again."})
     except Exception as e:

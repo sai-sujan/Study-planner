@@ -7,8 +7,84 @@ export const DSA_STORAGE_KEY = 'dp_dsa_progress_v1'
 export const DSA_SOLUTIONS_KEY = 'dp_dsa_solutions_v1'
 export const DSA_DAILY_KEY = 'dp_dsa_daily_v1'
 
-export function loadProgress() {
-  try { return JSON.parse(localStorage.getItem(DSA_STORAGE_KEY)) || {} }
+/* ── In-memory cache (synced from DB) ── */
+let _progressCache = null
+let _dailyCache = null
+let _solutionsCache = null
+let _notesCache = null
+let _dbSynced = false
+
+/* ── Sync from DB on first load ── */
+export async function syncFromDB() {
+  if (_dbSynced) return
+
+  // Read localStorage FIRST before anything overwrites it
+  const localProgress = _safeLoadJSON(DSA_STORAGE_KEY)
+  const localDaily = _safeLoadJSON(DSA_DAILY_KEY)
+  const localSolutions = _safeLoadJSON(DSA_SOLUTIONS_KEY)
+  const localNotes = _safeLoadJSON('dp_dsa_notes_v1')
+
+  try {
+    const [progRes, dailyRes, solRes, notesRes] = await Promise.all([
+      fetch('/api/dsa/progress').then(r => r.json()),
+      fetch('/api/dsa/daily').then(r => r.json()),
+      fetch('/api/dsa/solutions').then(r => r.json()),
+      fetch('/api/dsa/notes').then(r => r.json()),
+    ])
+
+    // Migration: if DB is empty but localStorage has data, push to DB
+    if (Object.keys(progRes).length === 0 && Object.keys(localProgress).length > 0) {
+      await fetch('/api/dsa/progress/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ progress: localProgress, daily: localDaily }),
+      })
+      _progressCache = localProgress
+      _dailyCache = localDaily
+
+      for (const [pid, code] of Object.entries(localSolutions)) {
+        fetch('/api/dsa/solutions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ problem_id: pid, code }),
+        })
+      }
+      _solutionsCache = localSolutions
+
+      for (const [pid, content] of Object.entries(localNotes)) {
+        fetch('/api/dsa/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ problem_id: pid, content }),
+        })
+      }
+      _notesCache = localNotes
+    } else {
+      // DB has data — merge: DB wins, but keep any localStorage-only entries
+      _progressCache = { ...localProgress, ...progRes }
+      _dailyCache = { ...localDaily, ...dailyRes }
+      _solutionsCache = { ...localSolutions, ...solRes }
+      _notesCache = { ...localNotes, ...notesRes }
+    }
+
+    // Update localStorage cache from merged data
+    localStorage.setItem(DSA_STORAGE_KEY, JSON.stringify(_progressCache))
+    localStorage.setItem(DSA_DAILY_KEY, JSON.stringify(_dailyCache))
+    localStorage.setItem(DSA_SOLUTIONS_KEY, JSON.stringify(_solutionsCache))
+    localStorage.setItem('dp_dsa_notes_v1', JSON.stringify(_notesCache))
+
+    _dbSynced = true
+  } catch {
+    // DB unavailable — fall back to localStorage
+    _progressCache = localProgress
+    _dailyCache = localDaily
+    _solutionsCache = localSolutions
+    _notesCache = localNotes
+  }
+}
+
+function _safeLoadJSON(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || {} }
   catch { return {} }
 }
 
@@ -17,47 +93,56 @@ function localDateStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function saveProgress(p, changedProbId, newStatus) {
-  try {
-    localStorage.setItem(DSA_STORAGE_KEY, JSON.stringify(p))
-    // Track daily history when a problem is marked solved (status 2)
-    if (changedProbId && newStatus === 2) {
-      const today = localDateStr()
-      const daily = loadDailyHistory()
-      if (!daily[today]) daily[today] = []
-      if (!daily[today].includes(changedProbId)) {
-        daily[today].push(changedProbId)
-      }
-      localStorage.setItem(DSA_DAILY_KEY, JSON.stringify(daily))
-    }
-  } catch {}
+/* ── Progress ── */
+export function loadProgress() {
+  if (_progressCache) return _progressCache
+  return _safeLoadJSON(DSA_STORAGE_KEY)
 }
 
-export function loadDailyHistory() {
-  try {
-    const daily = JSON.parse(localStorage.getItem(DSA_DAILY_KEY)) || {}
-    // One-time cleanup: remove corrupted backfill entries (old bug dumped all solved into one day)
-    const cleanupKey = 'dp_dsa_daily_cleaned_v2'
-    if (!localStorage.getItem(cleanupKey)) {
-      let changed = false
-      for (const date of Object.keys(daily)) {
-        if (daily[date].length > 25) {
-          delete daily[date]
-          changed = true
-        }
-      }
-      if (changed) localStorage.setItem(DSA_DAILY_KEY, JSON.stringify(daily))
-      localStorage.setItem(cleanupKey, '1')
+export function saveProgress(p, changedProbId, newStatus) {
+  _progressCache = p
+  localStorage.setItem(DSA_STORAGE_KEY, JSON.stringify(p))
+
+  // Save to DB with topic name for study_log auto-logging
+  if (changedProbId !== undefined) {
+    // Resolve problem title from ID (e.g. s2_t1_p1 → "Sort an Array of 0s 1s and 2s")
+    let topicLabel = changedProbId
+    const m = changedProbId.match(/^s(\d+)_t(\d+)_p(\d+)$/)
+    if (m) {
+      const [, si, ti, pi] = m.map(Number)
+      const prob = STEPS[si]?.topics[ti]?.problems[pi]
+      if (prob) topicLabel = prob.title
     }
-    return daily
+
+    fetch('/api/dsa/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problem_id: changedProbId, status: newStatus, topic: topicLabel }),
+    }).catch(() => {})
   }
-  catch { return {} }
+
+  // Track daily history when solved
+  if (changedProbId && newStatus === 2) {
+    const today = localDateStr()
+    const daily = loadDailyHistory()
+    if (!daily[today]) daily[today] = []
+    if (!daily[today].includes(changedProbId)) {
+      daily[today].push(changedProbId)
+    }
+    _dailyCache = daily
+    localStorage.setItem(DSA_DAILY_KEY, JSON.stringify(daily))
+  }
+}
+
+/* ── Daily History ── */
+export function loadDailyHistory() {
+  if (_dailyCache) return _dailyCache
+  return _safeLoadJSON(DSA_DAILY_KEY)
 }
 
 export function getDailyStats(date) {
   const daily = loadDailyHistory()
   const solved = daily[date] || []
-  // Resolve problem titles
   const titles = solved.map(pid => {
     const m = pid.match(/^s(\d+)_t(\d+)_p(\d+)$/)
     if (!m) return pid
@@ -68,17 +153,42 @@ export function getDailyStats(date) {
   return { count: solved.length, problems: titles, ids: solved }
 }
 
+/* ── Solutions ── */
 export function loadSolutions() {
-  try { return JSON.parse(localStorage.getItem(DSA_SOLUTIONS_KEY)) || {} }
-  catch { return {} }
+  if (_solutionsCache) return _solutionsCache
+  return _safeLoadJSON(DSA_SOLUTIONS_KEY)
 }
 
-export function saveSolution(problemId, code) {
-  try {
-    const all = loadSolutions()
-    all[problemId] = code
-    localStorage.setItem(DSA_SOLUTIONS_KEY, JSON.stringify(all))
-  } catch {}
+export function saveSolution(pid, code) {
+  if (!_solutionsCache) _solutionsCache = _safeLoadJSON(DSA_SOLUTIONS_KEY)
+  _solutionsCache[pid] = code
+  localStorage.setItem(DSA_SOLUTIONS_KEY, JSON.stringify(_solutionsCache))
+
+  // Save to DB
+  fetch('/api/dsa/solutions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ problem_id: pid, code }),
+  }).catch(() => {})
+}
+
+/* ── Notes ── */
+export function loadNotes() {
+  if (_notesCache) return _notesCache
+  return _safeLoadJSON('dp_dsa_notes_v1')
+}
+
+export function saveNote(pid, content) {
+  if (!_notesCache) _notesCache = _safeLoadJSON('dp_dsa_notes_v1')
+  _notesCache[pid] = content
+  localStorage.setItem('dp_dsa_notes_v1', JSON.stringify(_notesCache))
+
+  // Save to DB
+  fetch('/api/dsa/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ problem_id: pid, content }),
+  }).catch(() => {})
 }
 
 export function problemId(stepIdx, topicIdx, probIdx) {
@@ -1999,20 +2109,416 @@ if __name__ == "__main__":
       {
         label: 'Medium',
         problems: [
-          { title: 'Two Sum', difficulty: 'Easy' },
-          { title: 'Sort an Array of 0s 1s and 2s', difficulty: 'Medium' },
-          { title: 'Majority Element (> n/2 times)', difficulty: 'Medium' },
-          { title: 'Kadane\'s Algorithm — Maximum Subarray Sum', difficulty: 'Medium' },
-          { title: 'Print Subarray with Maximum Sum', difficulty: 'Medium' },
-          { title: 'Stock Buy and Sell', difficulty: 'Easy' },
-          { title: 'Rearrange Array Elements by Sign', difficulty: 'Medium' },
-          { title: 'Next Permutation', difficulty: 'Medium' },
-          { title: 'Leaders in an Array', difficulty: 'Easy' },
-          { title: 'Longest Consecutive Sequence in an Array', difficulty: 'Medium' },
-          { title: 'Set Matrix Zeroes', difficulty: 'Medium' },
-          { title: 'Rotate Image by 90 Degrees', difficulty: 'Medium' },
-          { title: 'Spiral Traversal of Matrix', difficulty: 'Medium' },
-          { title: 'Count Subarrays with Given Sum', difficulty: 'Medium' },
+          {
+            title: 'Two Sum',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3><p>Given an array of integers <code>nums</code> and an integer <code>target</code>, return the <b>indices</b> of the two numbers such that they add up to <code>target</code>.</p><p>You may assume that each input has <b>exactly one solution</b>, and you may not use the same element twice.</p><p>You can return the answer in <b>any order</b>.</p><h3>Examples</h3><pre>Input: nums = [2, 7, 11, 15], target = 9
+Output: [0, 1]
+Explanation: nums[0] + nums[1] = 2 + 7 = 9</pre><pre>Input: nums = [3, 2, 4], target = 6
+Output: [1, 2]
+Explanation: nums[1] + nums[2] = 2 + 4 = 6</pre><pre>Input: nums = [3, 3], target = 6
+Output: [0, 1]
+Explanation: nums[0] + nums[1] = 3 + 3 = 6</pre><h3>Constraints</h3><ul><li><code>2 &lt;= len(nums) &lt;= 10<sup>4</sup></code></li><li><code>-10<sup>9</sup> &lt;= nums[i] &lt;= 10<sup>9</sup></code></li><li><code>-10<sup>9</sup> &lt;= target &lt;= 10<sup>9</sup></code></li><li>Only <b>one valid answer</b> exists.</li></ul>`,
+            starterCode: `def two_sum(nums, target):
+    """
+    Given an array of integers nums and an integer target,
+    return indices of the two numbers that add up to target.
+    
+    Args:
+        nums: List[int] - array of integers
+        target: int - target sum
+    Returns:
+        List[int] - indices of the two numbers
+    """
+    pass
+
+
+# --- Test cases (do not modify) ---
+print("Sample calls:")
+print(f"two_sum([2, 7, 11, 15], 9) = {two_sum([2, 7, 11, 15], 9)}")
+print(f"two_sum([3, 2, 4], 6) = {two_sum([3, 2, 4], 6)}")
+print(f"two_sum([3, 3], 6) = {two_sum([3, 3], 6)}")
+
+print("\\n═══TEST_RESULTS═══")
+
+def check(test_num, nums, target, expected):
+    result = two_sum(nums, target)
+    if result is not None:
+        result = sorted(result)
+    expected = sorted(expected)
+    if result == expected:
+        print(f"Test {test_num}: PASSED ✅")
+        return True
+    else:
+        print(f"Test {test_num}: FAILED ❌ (expected {expected}, got {result})")
+        return False
+
+results = []
+
+# Test 1: Basic case
+results.append(check(1, [2, 7, 11, 15], 9, [0, 1]))
+
+# Test 2: Target pair not at start
+results.append(check(2, [3, 2, 4], 6, [1, 2]))
+
+# Test 3: Duplicate values
+results.append(check(3, [3, 3], 6, [0, 1]))
+
+# Test 4: Two elements only
+results.append(check(4, [1, 4], 5, [0, 1]))
+
+# Test 5: Negative numbers
+results.append(check(5, [-1, -2, -3, -4, -5], -8, [2, 4]))
+
+# Test 6: Mix of negative and positive
+results.append(check(6, [-3, 4, 3, 90], 0, [0, 2]))
+
+# Test 7: Target is zero with negatives
+results.append(check(7, [0, 4, 3, 0], 0, [0, 3]))
+
+# Test 8: Large values near constraint limits
+results.append(check(8, [1000000000, -1000000000, 3, 5], 0, [0, 1]))
+
+# Test 9: Pair at the very end of array
+results.append(check(9, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 19, [8, 9]))
+
+# Test 10: All same elements except answer pair uses duplicates
+results.append(check(10, [5, 5, 5, 5], 10, [0, 1]))
+
+# Test 11: Answer involves zero
+results.append(check(11, [0, 8, 7, 3, 2], 8, [0, 1]))
+
+# Test 12: Negative target
+results.append(check(12, [1, -7, 10, -3], -10, [1, 3]))
+
+all_pass = all(results)
+if all_pass:
+    print("\\n🎉 All tests passed!")
+`,
+          },
+          {
+            title: 'Sort an Array of 0s 1s and 2s',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an array containing only the integers <code>0</code>, <code>1</code>, and <code>2</code>, sort the array so that all <code>0</code>s come first, followed by all <code>1</code>s, and finally all <code>2</code>s.</p><p><b>Note:</b> You can solve this problem in-place with <code>O(n)</code> time and <code>O(1)</code> space using the Dutch National Flag algorithm.</p><h3>Examples</h3><pre>Input: [2, 0, 2, 1, 1, 0]
+Output: [0, 0, 1, 1, 2, 2]
+Explanation: All 0s are at the beginning, followed by 1s, then 2s.</pre><pre>Input: [2, 2, 1, 1, 0, 0]
+Output: [0, 0, 1, 1, 2, 2]
+Explanation: Already contains grouped elements, but out of order.</pre><pre>Input: [0, 1, 2]
+Output: [0, 1, 2]
+Explanation: Already sorted.</pre><h3>Constraints</h3><ul><li>1 &lt;= len(arr) &lt;= 10<sup>5</sup></li><li>Each element in arr is either 0, 1, or 2</li><li>You may modify the array in-place</li></ul>`,
+            starterCode: `def sortArray(arr):
+    """
+    Sort an array containing only 0s, 1s, and 2s.
+    
+    This is the Dutch National Flag problem. You can sort the array
+    in-place by using three pointers (low, mid, high) or by counting
+    occurrences of each number.
+    
+    Args:
+        arr: List of integers containing only 0, 1, or 2
+        
+    Returns:
+        List with all 0s first, then 1s, then 2s
+    """
+    pass
+
+
+# --- Test cases (do not modify) ---
+
+# Sample calls
+print("Sample calls:")
+print(f"sortArray([2, 0, 2, 1, 1, 0]) = {sortArray([2, 0, 2, 1, 1, 0])}")
+print(f"sortArray([0, 0, 1, 2, 2, 1]) = {sortArray([0, 0, 1, 2, 2, 1])}")
+print(f"sortArray([1]) = {sortArray([1])}")
+print()
+print("═══TEST_RESULTS═══")
+
+test_cases = [
+    ([2, 0, 2, 1, 1, 0], [0, 0, 1, 1, 2, 2]),  # Mixed array
+    ([0], [0]),  # Single element - zero
+    ([1], [1]),  # Single element - one
+    ([2], [2]),  # Single element - two
+    ([0, 0, 0], [0, 0, 0]),  # All zeros
+    ([1, 1, 1], [1, 1, 1]),  # All ones
+    ([2, 2, 2], [2, 2, 2]),  # All twos
+    ([0, 0, 1, 1, 2, 2], [0, 0, 1, 1, 2, 2]),  # Already sorted
+    ([2, 2, 1, 1, 0, 0], [0, 0, 1, 1, 2, 2]),  # Reverse sorted
+    ([1, 0], [0, 1]),  # Two elements
+    ([2, 1], [1, 2]),  # Two elements
+    ([1, 2, 0, 1, 2, 0, 2, 1, 0], [0, 0, 0, 1, 1, 1, 2, 2, 2]),  # Larger mixed
+]
+
+all_pass = True
+for i, (input_arr, expected) in enumerate(test_cases, 1):
+    result = sortArray(input_arr)
+    if result == expected:
+        print(f"Test {i}: PASSED ✅")
+    else:
+        print(f"Test {i}: FAILED ❌")
+        print(f"  Input: {input_arr}")
+        print(f"  Expected: {expected}")
+        print(f"  Got: {result}")
+        all_pass = False
+
+if all_pass:
+    print("\\n🎉 All tests passed!")`,
+          },
+          {
+            title: 'Majority Element (> n/2 times)',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an array <code>nums</code> of size <code>n</code>, return the majority element.</p><p>The majority element is the element that appears more than <code>⌊n / 2⌋</code> times. You may assume that the majority element always exists in the array.</p><h3>Examples</h3><pre>Input: nums = [3,2,3]\nOutput: 3</pre><pre>Input: nums = [2,2,1,1,1,2,2]\nOutput: 2</pre><h3>Constraints</h3><ul><li><code>n == nums.length</code></li><li><code>1 &lt;= n &lt;= 5 * 10<sup>4</sup></code></li></ul>`,
+            starterCode: `def majorityElement(nums):
+    """
+    Find the majority element in the array (appears > n/2 times).
+    """
+    pass
+
+# --- Test cases ---
+print("Testing majorityElement...")
+tests = [([3,2,3], 3), ([2,2,1,1,1,2,2], 2), ([1], 1)]
+all_pass = True
+for nums, exp in tests:
+    res = majorityElement(nums)
+    if res != exp:
+        print(f"❌ FAILED for {nums}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: "Kadane Algorithm — Maximum Subarray Sum",
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an integer array <code>nums</code>, find the contiguous subarray (containing at least one number) which has the largest sum and return its sum.</p><h3>Examples</h3><pre>Input: nums = [-2,1,-3,4,-1,2,1,-5,4]\nOutput: 6\nExplanation: [4,-1,2,1] has the largest sum = 6.</pre><pre>Input: nums = [1]\nOutput: 1</pre><h3>Constraints</h3><ul><li><code>1 &lt;= nums.length &lt;= 10<sup>5</sup></code></li><li><code>-10<sup>4</sup> &lt;= nums[i] &lt;= 10<sup>4</sup></code></li></ul>`,
+            starterCode: `def maxSubArray(nums):
+    """
+    Find the contiguous subarray with the largest sum and return its sum.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing maxSubArray...")
+tests = [([-2,1,-3,4,-1,2,1,-5,4], 6), ([1], 1), ([5,4,-1,7,8], 23), ([-1,-2,-3], -1)]
+all_pass = True
+for nums, exp in tests:
+    res = maxSubArray(nums)
+    if res != exp:
+        print(f"❌ FAILED for {nums}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Print Subarray with Maximum Sum',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Instead of just the sum, return the actual contiguous subarray that has the maximum sum.</p><h3>Examples</h3><pre>Input: nums = [-2,1,-3,4,-1,2,1,-5,4]\nOutput: [4,-1,2,1]</pre><h3>Constraints</h3><ul><li><code>1 &lt;= nums.length &lt;= 10<sup>5</sup></code></li></ul>`,
+            starterCode: `def getMaximumSubarray(nums):
+    """
+    Return the contiguous subarray with the largest sum.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing getMaximumSubarray...")
+tests = [([-2,1,-3,4,-1,2,1,-5,4], [4,-1,2,1]), ([1], [1]), ([-1,-2,-3], [-1])]
+all_pass = True
+for nums, exp in tests:
+    res = getMaximumSubarray(nums)
+    if res != exp:
+        print(f"❌ FAILED for {nums}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Stock Buy and Sell',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3><p>You are given an array <code>prices</code> where <code>prices[i]</code> is the price of a given stock on the <code>i<sup>th</sup></code> day.</p><p>You want to maximize your profit by choosing a single day to buy one stock and choosing a different day in the future to sell that stock.</p><p>Return the maximum profit you can achieve from this transaction. If you cannot achieve any profit, return 0.</p><h3>Examples</h3><pre>Input: prices = [7,1,5,3,6,4]\nOutput: 5\nExplanation: Buy on day 2 (price = 1) and sell on day 5 (price = 6), profit = 6-1 = 5.</pre><h3>Constraints</h3><ul><li><code>1 &lt;= prices.length &lt;= 10<sup>5</sup></code></li><li><code>0 &lt;= prices[i] &lt;= 10<sup>4</sup></code></li></ul>`,
+            starterCode: `def maxProfit(prices):
+    """
+    Return the maximum profit achievable by buying and selling once.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing maxProfit...")
+tests = [([7,1,5,3,6,4], 5), ([7,6,4,3,1], 0)]
+all_pass = True
+for prices, exp in tests:
+    res = maxProfit(prices)
+    if res != exp:
+        print(f"❌ FAILED for {prices}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Rearrange Array Elements by Sign',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>You are given a 0-indexed integer array <code>nums</code> of even length consisting of an equal number of positive and negative integers.</p><p>Rearrange the elements of <code>nums</code> such that the modified array follows the given conditions:</p><ol><li>Every consecutive pair of integers have opposite signs.</li><li>For all integers with the same sign, the order in which they were present in <code>nums</code> is preserved.</li><li>The rearranged array begins with a positive integer.</li></ol><h3>Examples</h3><pre>Input: nums = [3,1,-2,-5,2,-4]\nOutput: [3,-2,1,-5,2,-4]</pre><h3>Constraints</h3><ul><li><code>2 &lt;= nums.length &lt;= 2 * 10<sup>5</sup></code></li><li><code>nums.length</code> is even</li></ul>`,
+            starterCode: `def rearrangeArray(nums):
+    """
+    Rearrange the array elements by alternating positive and negative signs.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing rearrangeArray...")
+tests = [([3,1,-2,-5,2,-4], [3,-2,1,-5,2,-4]), ([-1,1], [1,-1])]
+all_pass = True
+for nums, exp in tests:
+    res = rearrangeArray(nums)
+    if res != exp:
+        print(f"❌ FAILED for {nums}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Next Permutation',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>A permutation of an array of integers is an arrangement of its members into a sequence or linear order.</p><p>The next permutation of an array of integers is the next lexicographically greater permutation of its integer. More formally, if all the permutations of the array are sorted in one container according to their lexicographical order, then the next permutation of that array is the permutation that follows it in the sorted container.</p><p>If such arrangement is not possible, the array must be rearranged as the lowest possible order (i.e., sorted in ascending order).</p><h3>Examples</h3><pre>Input: nums = [1,2,3]\nOutput: [1,3,2]</pre><pre>Input: nums = [3,2,1]\nOutput: [1,2,3]</pre><pre>Input: nums = [1,1,5]\nOutput: [1,5,1]</pre><h3>Constraints</h3><ul><li><code>1 &lt;= nums.length &lt;= 100</code></li><li>Must be done in-place!</li></ul>`,
+            starterCode: `def nextPermutation(nums):
+    """
+    Modify nums in-place to the next lexicographically greater permutation.
+    Return the modified array for testing purposes.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing nextPermutation...")
+tests = [([1,2,3], [1,3,2]), ([3,2,1], [1,2,3]), ([1,1,5], [1,5,1])]
+all_pass = True
+for nums, exp in tests:
+    original = nums.copy()
+    res = nextPermutation(nums)
+    if nums != exp and res != exp: # Accept both in-place or returned array
+        print(f"❌ FAILED for {original}: expected {exp}, got {nums}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Leaders in an Array',
+            difficulty: 'Easy',
+            description: `<h3>Problem</h3><p>Given an array, print all the elements which are leaders. A Leader is an element that is greater than all of the elements on its right side in the array.</p><p>The rightmost element is always a leader.</p><h3>Examples</h3><pre>Input: arr = [16, 17, 4, 3, 5, 2]\nOutput: [17, 5, 2]</pre><pre>Input: arr = [1, 2, 3, 4, 0]\nOutput: [4, 0]</pre><h3>Constraints</h3><ul><li><code>1 &lt;= arr.length &lt;= 10<sup>5</sup></code></li></ul>`,
+            starterCode: `def getLeaders(arr):
+    """
+    Return all elements that are strictly greater than all elements to their right.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing getLeaders...")
+tests = [([16,17,4,3,5,2], [17,5,2]), ([1,2,3,4,0], [4,0])]
+all_pass = True
+for arr, exp in tests:
+    res = getLeaders(arr)
+    if res != exp:
+        print(f"❌ FAILED for {arr}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Longest Consecutive Sequence in an Array',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an unsorted array of integers <code>nums</code>, return the length of the longest consecutive elements sequence.</p><p>You must write an algorithm that runs in <code>O(n)</code> time.</p><h3>Examples</h3><pre>Input: nums = [100, 4, 200, 1, 3, 2]\nOutput: 4\nExplanation: The longest consecutive elements sequence is [1, 2, 3, 4]. Therefore its length is 4.</pre><pre>Input: nums = [0,3,7,2,5,8,4,6,0,1]\nOutput: 9</pre><h3>Constraints</h3><ul><li><code>0 &lt;= nums.length &lt;= 10<sup>5</sup></code></li></ul>`,
+            starterCode: `def longestConsecutive(nums):
+    """
+    Return the length of the longest consecutive sequence. Time complexity must be O(n).
+    """
+    pass
+
+# --- Test cases ---
+print("Testing longestConsecutive...")
+tests = [([100,4,200,1,3,2], 4), ([0,3,7,2,5,8,4,6,0,1], 9), ([], 0)]
+all_pass = True
+for nums, exp in tests:
+    res = longestConsecutive(nums)
+    if res != exp:
+        print(f"❌ FAILED for {nums}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Set Matrix Zeroes',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an <code>m x n</code> integer matrix <code>matrix</code>, if an element is <code>0</code>, set its entire row and column to <code>0</code>'s.</p><p>You must do it <b>in place</b>.</p><h3>Examples</h3><pre>Input: matrix = [[1,1,1],[1,0,1],[1,1,1]]\nOutput: [[1,0,1],[0,0,0],[1,0,1]]</pre><h3>Constraints</h3><ul><li><code>m == matrix.length</code></li><li><code>n == matrix[0].length</code></li></ul>`,
+            starterCode: `def setZeroes(matrix):
+    """
+    Set corresponding queries to 0 in-place.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing setZeroes...")
+tests = [([[1,1,1],[1,0,1],[1,1,1]], [[1,0,1],[0,0,0],[1,0,1]])]
+all_pass = True
+for matrix, exp in tests:
+    original = [row[:] for row in matrix]
+    setZeroes(matrix)
+    if matrix != exp:
+        print(f"❌ FAILED for {original}: expected {exp}, got {matrix}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Rotate Image by 90 Degrees',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>You are given an <code>n x n</code> 2D <code>matrix</code> representing an image, rotate the image by <b>90 degrees (clockwise)</b>.</p><p>You have to rotate the image <b>in-place</b>.</p><h3>Examples</h3><pre>Input: matrix = [[1,2,3],[4,5,6],[7,8,9]]\nOutput: [[7,4,1],[8,5,2],[9,6,3]]</pre><h3>Constraints</h3><ul><li><code>n == matrix.length == matrix[i].length</code></li><li><code>1 &lt;= n &lt;= 20</code></li></ul>`,
+            starterCode: `def rotate(matrix):
+    """
+    Rotate the matrix 90 degrees clockwise in-place.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing rotate...")
+tests = [([[1,2,3],[4,5,6],[7,8,9]], [[7,4,1],[8,5,2],[9,6,3]])]
+all_pass = True
+for matrix, exp in tests:
+    original = [row[:] for row in matrix]
+    rotate(matrix)
+    if matrix != exp:
+        print(f"❌ FAILED for {original}: expected {exp}, got {matrix}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Spiral Traversal of Matrix',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an <code>m x n</code> <code>matrix</code>, return all elements of the matrix in spiral order.</p><h3>Examples</h3><pre>Input: matrix = [[1,2,3],[4,5,6],[7,8,9]]\nOutput: [1,2,3,6,9,8,7,4,5]</pre><h3>Constraints</h3><ul><li><code>m == matrix.length</code></li><li><code>n == matrix[i].length</code></li></ul>`,
+            starterCode: `def spiralOrder(matrix):
+    """
+    Return the elements of the matrix in spiral order.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing spiralOrder...")
+tests = [([[1,2,3],[4,5,6],[7,8,9]], [1,2,3,6,9,8,7,4,5])]
+all_pass = True
+for matrix, exp in tests:
+    res = spiralOrder(matrix)
+    if res != exp:
+        print(f"❌ FAILED: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
+          {
+            title: 'Count Subarrays with Given Sum',
+            difficulty: 'Medium',
+            description: `<h3>Problem</h3><p>Given an array of integers <code>nums</code> and an integer <code>k</code>, return the total number of subarrays whose sum equals to <code>k</code>.</p><p>A subarray is a contiguous non-empty sequence of elements within an array.</p><h3>Examples</h3><pre>Input: nums = [1,1,1], k = 2\nOutput: 2</pre><pre>Input: nums = [1,2,3], k = 3\nOutput: 2</pre><h3>Constraints</h3><ul><li><code>1 &lt;= nums.length &lt;= 2 * 10<sup>4</sup></code></li><li><code>-1000 &lt;= nums[i] &lt;= 1000</code></li></ul>`,
+            starterCode: `def subarraySum(nums, k):
+    """
+    Return the total number of continuous subarrays whose sum equals to k.
+    """
+    pass
+
+# --- Test cases ---
+print("Testing subarraySum...")
+tests = [([1,1,1], 2, 2), ([1,2,3], 3, 2)]
+all_pass = True
+for nums, k, exp in tests:
+    res = subarraySum(nums, k)
+    if res != exp:
+        print(f"❌ FAILED for {nums}: expected {exp}, got {res}")
+        all_pass = False
+if all_pass: print("✅ All tests passed!")`
+          },
         ],
       },
       {

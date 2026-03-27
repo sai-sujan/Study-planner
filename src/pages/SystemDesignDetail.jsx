@@ -1,19 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { SECTIONS, loadChecks, saveChecks, itemId } from '../data/genAIData'
+import { SECTIONS, loadChecks, saveChecks, itemId } from '../data/systemDesignData'
 import GenAIBlog from './GenAIBlog'
 import TopicBlog from './TopicBlog'
 import AffirmationBanner from '../components/AffirmationBanner'
 
-export default function GenAIDetail() {
+export default function SystemDesignDetail() {
   const { sectionId } = useParams()
   const navigate = useNavigate()
   const section = SECTIONS.find(s => s.id === sectionId)
 
   const [checks, setChecks] = useState(loadChecks)
   const [showBlog, setShowBlog] = useState(false)
-  const [topicBlog, setTopicBlog] = useState(null) // { topicName } or null
-  const [savedBlogs, setSavedBlogs] = useState(new Set()) // topic names that have saved blogs
+  const [topicBlog, setTopicBlog] = useState(null)
+  const [savedBlogs, setSavedBlogs] = useState(new Set())
   const [openSubs, setOpenSubs] = useState(() => {
     const o = new Set()
     if (section) section.subsections.forEach(sub => o.add(sub.label))
@@ -21,14 +21,12 @@ export default function GenAIDetail() {
   })
   const [search, setSearch] = useState('')
 
-  // Sync checks across tabs / overview page
   useEffect(() => {
     const sync = () => setChecks(loadChecks())
     window.addEventListener('storage', sync)
     return () => window.removeEventListener('storage', sync)
   }, [])
 
-  // Load which topics have saved blogs
   useEffect(() => {
     fetch('http://localhost:5050/api/genai/topic-blogs')
       .then(r => r.json())
@@ -37,7 +35,7 @@ export default function GenAIDetail() {
         setSavedBlogs(names)
       })
       .catch(() => {})
-  }, [sectionId, topicBlog]) // refetch when a blog modal closes (topicBlog changes)
+  }, [sectionId, topicBlog])
 
   const toggle = useCallback((id) => {
     setChecks(prev => {
@@ -74,12 +72,11 @@ export default function GenAIDetail() {
       <div style={{ textAlign: 'center', paddingTop: 80 }}>
         <div style={{ fontSize: '3rem', marginBottom: 16 }}>🤔</div>
         <div style={{ color: 'var(--neu-text-secondary)', marginBottom: 24 }}>Section not found.</div>
-        <button className="btn btn-primary" onClick={() => navigate('/genai')}>← Back to Roadmap</button>
+        <button className="btn btn-primary" onClick={() => navigate('/systemdesign')}>← Back to Roadmap</button>
       </div>
     )
   }
 
-  // Progress for this section
   let total = 0, done = 0
   section.subsections.forEach(sub => sub.items.forEach((_, i) => {
     total++; if (checks[itemId(section.id, sub.label, i)]) done++
@@ -88,21 +85,20 @@ export default function GenAIDetail() {
 
   const q = search.toLowerCase()
 
-  // All sections for the sidebar nav
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
-      <AffirmationBanner context="genai" />
+      <AffirmationBanner context="systemdesign" />
 
-      {/* ── Back button ── */}
+      {/* Back button */}
       <button
         className="btn btn-secondary btn-sm"
-        onClick={() => navigate('/genai')}
+        onClick={() => navigate('/systemdesign')}
         style={{ marginBottom: 20, display: 'inline-flex', alignItems: 'center', gap: 6 }}
       >
         ← All Topics
       </button>
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div style={{
         background: 'var(--neu-bg)',
         borderRadius: 24,
@@ -113,14 +109,12 @@ export default function GenAIDetail() {
         position: 'relative',
         overflow: 'hidden',
       }}>
-        {/* Glow */}
         <div style={{
           position: 'absolute', top: -30, right: -30,
           width: 160, height: 160, borderRadius: '50%',
           background: section.bg, filter: 'blur(40px)', pointerEvents: 'none'
         }} />
 
-        {/* Blog button pinned top-right of header card */}
         <button
           className="btn btn-primary btn-sm"
           onClick={() => setShowBlog(true)}
@@ -148,7 +142,6 @@ export default function GenAIDetail() {
           </div>
         </div>
 
-        {/* Progress bar */}
         <div className="prep-progress-label" style={{ marginBottom: 6 }}>
           <span style={{ color: 'var(--neu-text-secondary)', fontSize: '.8rem' }}>Progress</span>
           <span style={{ color: section.color, fontFamily: 'monospace', fontWeight: 700 }}>{done} / {total} ({pct}%)</span>
@@ -158,7 +151,7 @@ export default function GenAIDetail() {
         </div>
       </div>
 
-      {/* ── Controls ── */}
+      {/* Controls */}
       <div className="flex gap-sm items-center" style={{ marginBottom: 20, flexWrap: 'wrap' }}>
         <input
           type="text"
@@ -173,7 +166,7 @@ export default function GenAIDetail() {
         <button className="btn btn-secondary btn-sm" onClick={() => markAllSection(false)}>↺ Uncheck all</button>
       </div>
 
-      {/* ── Other sections quick nav ── */}
+      {/* Other sections quick nav */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 24 }}>
         {SECTIONS.filter(s => s.id !== section.id).map(s => {
           let st = 0, sd = 0
@@ -184,7 +177,7 @@ export default function GenAIDetail() {
           return (
             <button
               key={s.id}
-              onClick={() => navigate(`/genai/${s.id}`)}
+              onClick={() => navigate(`/systemdesign/${s.id}`)}
               style={{
                 background: 'var(--neu-bg)',
                 border: 'none',
@@ -210,7 +203,7 @@ export default function GenAIDetail() {
         })}
       </div>
 
-      {/* ── Subsections ── */}
+      {/* Subsections */}
       {section.subsections.map(sub => {
         const filteredItems = q
           ? sub.items.map((item, i) => ({ item, i })).filter(({ item }) => item.toLowerCase().includes(q))
@@ -230,7 +223,6 @@ export default function GenAIDetail() {
             className={`prep-day-card${allSubDone ? ' all-done' : ''}`}
             style={{ marginBottom: 14 }}
           >
-            {/* Subsection Header */}
             <div className="prep-day-header" onClick={() => toggleSub(sub.label)}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span
@@ -253,7 +245,6 @@ export default function GenAIDetail() {
               </div>
             </div>
 
-            {/* Items list */}
             {(isOpen || q) && (
               <div className="prep-day-body">
                 {filteredItems.map(({ item, i }) => {
@@ -307,10 +298,10 @@ export default function GenAIDetail() {
         )
       })}
 
-      {/* ── Section blog modal ── */}
+      {/* Section blog modal */}
       {showBlog && <GenAIBlog section={section} onClose={() => setShowBlog(false)} />}
 
-      {/* ── Topic blog modal ── */}
+      {/* Topic blog modal */}
       {topicBlog && (
         <TopicBlog
           topicName={topicBlog.topicName}
@@ -322,7 +313,7 @@ export default function GenAIDetail() {
         />
       )}
 
-      {/* ── Bottom nav ── */}
+      {/* Bottom nav */}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32, flexWrap: 'wrap', gap: 12 }}>
         {(() => {
           const idx = SECTIONS.findIndex(s => s.id === sectionId)
@@ -331,12 +322,12 @@ export default function GenAIDetail() {
           return (
             <>
               {prev ? (
-                <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/genai/${prev.id}`)}>
+                <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/systemdesign/${prev.id}`)}>
                   ← {prev.icon} {prev.title}
                 </button>
               ) : <span />}
               {next ? (
-                <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/genai/${next.id}`)}>
+                <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/systemdesign/${next.id}`)}>
                   {next.icon} {next.title} →
                 </button>
               ) : <span />}
